@@ -1,0 +1,277 @@
+#!/usr/bin/env python3
+"""
+course-check - Autonomous Robotics Course VM health check.
+
+This is not a convenience script. It is the evidence that decides whether a
+failure during a graded session is the student's problem or the infrastructure's
+problem, so it behaves like a test suite: deterministic, exit coded, and it
+writes an artifact.
+
+  exit 0   all required checks passed
+  exit 1   at least one required check failed; an incident ID is printed
+  exit 2   the script itself could not run
+
+Usage:
+    course-check              full check
+    course-check --quick      skip the slower package import checks
+    course-check --json       machine readable output only
+
+Artifact: ~/arc_ws/.arc/health-<timestamp>.json
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import platform
+import shutil
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+EXPECTED = {
+    "vm_release": "2026.1",
+    "ubuntu": "24.04",
+    "ros_distro": "jazzy",
+    "python_minor": 12,
+}
+
+RESET = "\033[0m"
+COLOURS = {"PASS": "\033[32m", "FAIL": "\033[31m", "WARN": "\033[33m", "SKIP": "\033[90m"}
+
+
+class Report:
+    def __init__(self) -> None:
+        self.rows: list[dict] = []
+
+    def add(self, name: str, status: str, observed: str = "", required: bool = True,
+            expected: str = "") -> None:
+        self.rows.append({
+            "check": name, "status": status, "observed": observed,
+            "expected": expected, "required": required,
+        })
+
+    @property
+    def failed(self) -> list[dict]:
+        return [r for r in self.rows if r["status"] == "FAIL" and r["required"]]
+
+    def render(self) -> str:
+        width = max(len(r["check"]) for r in self.rows) + 2
+        lines = []
+        for r in self.rows:
+            colour = COLOURS.get(r["status"], "")
+            detail = r["observed"]
+            if r["expected"] and r["status"] == "FAIL":
+                detail = f"{detail}  (expected {r['expected']})"
+            lines.append(f"  {r['check'].ljust(width)}{colour}{r['status']:<5}{RESET} {detail}")
+        return "\n".join(lines)
+
+
+def sh(cmd: list[str], timeout: int = 20) -> tuple[int, str]:
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=False)
+        return p.returncode, (p.stdout + p.stderr).strip()
+    except FileNotFoundError:
+        return 127, "not installed"
+    except subprocess.TimeoutExpired:
+        return 124, "timed out"
+
+
+def check_os(rep: Report) -> None:
+    release = Path("/etc/os-release")
+    version = "unknown"
+    if release.exists():
+        for line in release.read_text().splitlines():
+            if line.startswith("VERSION_ID="):
+                version = line.split("=", 1)[1].strip('"')
+    ok = version == EXPECTED["ubuntu"]
+    rep.add("Ubuntu", "PASS" if ok else "FAIL", version, expected=EXPECTED["ubuntu"])
+    rep.add("Kernel", "PASS", platform.release(), required=False)
+
+    declared = os.environ.get("ARC_VM_RELEASE", "")
+    rep.add("ARC VM release", "PASS" if declared == EXPECTED["vm_release"] else "FAIL",
+            declared or "unset", expected=EXPECTED["vm_release"])
+
+
+def check_resources(rep: Report) -> None:
+    cores = os.cpu_count() or 0
+    rep.add("vCPU count", "PASS" if cores >= 4 else "FAIL", str(cores), expected=">= 4")
+
+    mem_gb = 0.0
+    meminfo = Path("/proc/meminfo")
+    if meminfo.exists():
+        for line in meminfo.read_text().splitlines():
+            if line.startswith("MemTotal:"):
+                mem_gb = int(line.split()[1]) / 1024 / 1024
+    rep.add("RAM", "PASS" if mem_gb >= 7.5 else "FAIL", f"{mem_gb:.1f} GB", expected=">= 8 GB")
+
+    free_gb = shutil.disk_usage(Path.home()).free / 1024 ** 3
+    status = "PASS" if free_gb >= 12 else ("WARN" if free_gb >= 6 else "FAIL")
+    rep.add("Free disk", status, f"{free_gb:.1f} GB", expected=">= 12 GB")
+
+
+def check_ros(rep: Report) -> None:
+    distro = os.environ.get("ROS_DISTRO", "")
+    rep.add("ROS_DISTRO", "PASS" if distro == EXPECTED["ros_distro"] else "FAIL",
+            distro or "unset (did you source the setup file?)", expected=EXPECTED["ros_distro"])
+
+    code, out = sh(["ros2", "--help"])
+    rep.add("ros2 CLI", "PASS" if code == 0 else "FAIL", "available" if code == 0 else out)
+
+    # Discovery isolation. A wrong value here is invisible until two students
+    # silently interfere with each other during a graded session.
+    rng = os.environ.get("ROS_AUTOMATIC_DISCOVERY_RANGE", "")
+    rep.add("Discovery range", "PASS" if rng == "LOCALHOST" else "FAIL",
+            rng or "unset", expected="LOCALHOST")
+
+    domain = os.environ.get("ROS_DOMAIN_ID", "")
+    rep.add("ROS_DOMAIN_ID", "PASS" if domain.isdigit() and 0 <= int(domain) <= 101 else "FAIL",
+            domain or "unset", expected="integer 0 to 101")
+
+    rmw = os.environ.get("RMW_IMPLEMENTATION", "default")
+    rep.add("RMW implementation", "PASS", rmw, required=False)
+
+    for package in ("nav2_bringup", "slam_toolbox", "robot_localization",
+                    "ros_gz_sim", "ros2_control", "rviz2"):
+        code, _ = sh(["ros2", "pkg", "prefix", package], timeout=15)
+        rep.add(f"pkg {package}", "PASS" if code == 0 else "FAIL",
+                "found" if code == 0 else "missing")
+
+
+def check_graphics(rep: Report) -> str:
+    """Determine and report the graphics tier defined in the design baseline."""
+    code, out = sh(["glxinfo", "-B"])
+    if code != 0:
+        rep.add("OpenGL", "FAIL", "glxinfo unavailable")
+        return "C"
+
+    renderer = next((l.split(":", 1)[1].strip() for l in out.splitlines()
+                     if "OpenGL renderer string" in l), "unknown")
+    version = next((l.split(":", 1)[1].strip() for l in out.splitlines()
+                    if l.strip().startswith("OpenGL version string")), "unknown")
+    software = any(k in renderer.lower() for k in ("llvmpipe", "softpipe", "swrast"))
+
+    rep.add("OpenGL renderer", "WARN" if software else "PASS", renderer, required=False)
+    rep.add("OpenGL version", "PASS", version, required=False)
+
+    tier = "B" if software else "A"
+    rep.add("Graphics tier", "PASS", f"Tier {tier}"
+            + (" (software rendering, use headless Gazebo)" if software else ""),
+            required=False)
+    return tier
+
+
+def check_gazebo(rep: Report) -> None:
+    code, out = sh(["gz", "sim", "--versions"], timeout=25)
+    rep.add("Gazebo", "PASS" if code == 0 else "FAIL",
+            out.splitlines()[0] if code == 0 and out else "not available")
+
+
+def check_python(rep: Report, quick: bool) -> None:
+    minor = sys.version_info.minor
+    rep.add("Python", "PASS" if minor == EXPECTED["python_minor"] else "WARN",
+            platform.python_version(), expected=f"3.{EXPECTED['python_minor']}")
+    if quick:
+        rep.add("Python packages", "SKIP", "--quick given", required=False)
+        return
+    for module, label in (("numpy", "NumPy"), ("torch", "PyTorch"),
+                          ("gymnasium", "Gymnasium"), ("stable_baselines3", "Stable-Baselines3"),
+                          ("matplotlib", "Matplotlib"), ("pandas", "pandas"), ("yaml", "PyYAML")):
+        code, out = sh([sys.executable, "-c",
+                        f"import {module}; print(getattr({module}, '__version__', 'ok'))"], timeout=90)
+        rep.add(label, "PASS" if code == 0 else "FAIL", out.splitlines()[-1] if out else "import failed")
+
+
+def check_tools(rep: Report) -> None:
+    for binary, label, required in (("git", "Git", True), ("colcon", "colcon", True),
+                                    ("rosdep", "rosdep", True), ("code", "VS Code", False),
+                                    ("docker", "Docker", False), ("cmake", "CMake", True)):
+        path = shutil.which(binary)
+        rep.add(label, "PASS" if path else ("FAIL" if required else "WARN"),
+                path or "not installed", required=required)
+
+
+def check_workspace(rep: Report) -> None:
+    ws = Path.home() / "arc_ws"
+    rep.add("Workspace", "PASS" if ws.is_dir() else "FAIL", str(ws) if ws.is_dir() else "missing")
+    git_dir = ws / "src" / ".git"
+    rep.add("Workspace is a Git repo", "PASS" if git_dir.exists() else "WARN",
+            "yes" if git_dir.exists() else "no; work will be lost on VM reset",
+            required=False)
+
+
+def incident_id(report: Report) -> str:
+    seat = os.environ.get("ARC_SEAT_ID", "na")
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d")
+    digest = hashlib.sha1(
+        json.dumps([r["check"] for r in report.failed], sort_keys=True).encode()
+    ).hexdigest()[:6]
+    return f"ARC-{seat}-{stamp}-{digest}"
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="ARC VM health check")
+    parser.add_argument("--quick", action="store_true", help="skip slow package imports")
+    parser.add_argument("--json", action="store_true", help="machine readable output only")
+    args = parser.parse_args(argv)
+
+    rep = Report()
+    check_os(rep)
+    check_resources(rep)
+    check_ros(rep)
+    tier = check_graphics(rep)
+    check_gazebo(rep)
+    check_python(rep, args.quick)
+    check_tools(rep)
+    check_workspace(rep)
+
+    failed = rep.failed
+    payload = {
+        "generated_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "vm_release": os.environ.get("ARC_VM_RELEASE", "unset"),
+        "seat": os.environ.get("ARC_SEAT_ID", "unset"),
+        "graphics_tier": tier,
+        "passed": not failed,
+        "incident_id": incident_id(rep) if failed else None,
+        "checks": rep.rows,
+    }
+
+    artifact_dir = Path.home() / "arc_ws" / ".arc"
+    try:
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        (artifact_dir / f"health-{stamp}.json").write_text(json.dumps(payload, indent=2))
+    except OSError:
+        pass  # never let artifact writing be the reason the check fails
+
+    if args.json:
+        print(json.dumps(payload, indent=2))
+        return 0 if not failed else 1
+
+    print(f"\nAutonomous Robotics Course VM check  release {payload['vm_release']}  "
+          f"seat {payload['seat']}\n")
+    print(rep.render())
+
+    if not failed:
+        print(f"\n  All required checks passed. Graphics tier {tier}.\n")
+        return 0
+
+    print(f"\n  {len(failed)} required check(s) failed:")
+    for row in failed:
+        print(f"    - {row['check']}: observed {row['observed'] or 'nothing'}"
+              + (f", expected {row['expected']}" if row["expected"] else ""))
+    print(f"\n  Incident ID: {payload['incident_id']}")
+    print("  Show this to your demonstrator. Marks are not lost for failures of the")
+    print("  official environment, but the incident must be recorded at the time.\n")
+    return 1
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except Exception as exc:  # pragma: no cover
+        print(f"course-check could not run: {exc}", file=sys.stderr)
+        sys.exit(2)

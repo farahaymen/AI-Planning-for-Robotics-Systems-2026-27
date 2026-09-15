@@ -1,0 +1,97 @@
+<?xml version="1.0" ?>
+<!-- ARC warehouse. Deliberately low polygon: this must run on the weakest
+     laboratory PC in graphics Tier B, not look impressive in a screenshot. -->
+<sdf version="1.9">
+  <world name="arc_warehouse">
+    <physics name="1ms" type="ignored">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+    </physics>
+
+    <plugin filename="gz-sim-physics-system" name="gz::sim::systems::Physics"/>
+    <plugin filename="gz-sim-user-commands-system" name="gz::sim::systems::UserCommands"/>
+    <plugin filename="gz-sim-scene-broadcaster-system" name="gz::sim::systems::SceneBroadcaster"/>
+    <plugin filename="gz-sim-sensors-system" name="gz::sim::systems::Sensors">
+      <render_engine>ogre2</render_engine>
+    </plugin>
+    <plugin filename="gz-sim-imu-system" name="gz::sim::systems::Imu"/>
+
+    <light type="directional" name="sun">
+      <cast_shadows>false</cast_shadows>
+      <pose>0 0 10 0 0 0</pose>
+      <diffuse>0.9 0.9 0.9 1</diffuse>
+      <specular>0.2 0.2 0.2 1</specular>
+      <direction>-0.5 0.2 -0.9</direction>
+    </light>
+
+    <model name="ground_plane">
+      <static>true</static>
+      <link name="link">
+        <collision name="collision">
+          <geometry><plane><normal>0 0 1</normal><size>40 40</size></plane></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><plane><normal>0 0 1</normal><size>40 40</size></plane></geometry>
+          <material><ambient>0.8 0.8 0.8 1</ambient><diffuse>0.8 0.8 0.8 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- Perimeter: a 12 x 12 m room. -->
+    <model name="walls">
+      <static>true</static>
+      <link name="link">
+        <collision name="n"><pose>6 12 0.5 0 0 0</pose>
+          <geometry><box><size>12 0.15 1.0</size></box></geometry></collision>
+        <visual name="nv"><pose>6 12 0.5 0 0 0</pose>
+          <geometry><box><size>12 0.15 1.0</size></box></geometry></visual>
+        <collision name="s"><pose>6 0 0.5 0 0 0</pose>
+          <geometry><box><size>12 0.15 1.0</size></box></geometry></collision>
+        <visual name="sv"><pose>6 0 0.5 0 0 0</pose>
+          <geometry><box><size>12 0.15 1.0</size></box></geometry></visual>
+        <collision name="w"><pose>0 6 0.5 0 0 0</pose>
+          <geometry><box><size>0.15 12 1.0</size></box></geometry></collision>
+        <visual name="wv"><pose>0 6 0.5 0 0 0</pose>
+          <geometry><box><size>0.15 12 1.0</size></box></geometry></visual>
+        <collision name="e"><pose>12 6 0.5 0 0 0</pose>
+          <geometry><box><size>0.15 12 1.0</size></box></geometry></collision>
+        <visual name="ev"><pose>12 6 0.5 0 0 0</pose>
+          <geometry><box><size>0.15 12 1.0</size></box></geometry></visual>
+      </link>
+    </model>
+
+    <!-- A partition with a 1.2 m doorway. Lab 6 plans through this gap, and it
+         is the one that closes when the inflation radius is set too large. -->
+    <model name="partition">
+      <static>true</static>
+      <link name="link">
+        <collision name="lower"><pose>6 2.4 0.5 0 0 0</pose>
+          <geometry><box><size>0.15 4.8 1.0</size></box></geometry></collision>
+        <visual name="lowerv"><pose>6 2.4 0.5 0 0 0</pose>
+          <geometry><box><size>0.15 4.8 1.0</size></box></geometry></visual>
+        <collision name="upper"><pose>6 9.0 0.5 0 0 0</pose>
+          <geometry><box><size>0.15 6.0 1.0</size></box></geometry></collision>
+        <visual name="upperv"><pose>6 9.0 0.5 0 0 0</pose>
+          <geometry><box><size>0.15 6.0 1.0</size></box></geometry></visual>
+      </link>
+    </model>
+
+    <model name="pillars">
+      <static>true</static>
+      <link name="link">
+        <collision name="p1"><pose>3 8 0.5 0 0 0</pose>
+          <geometry><cylinder><radius>0.35</radius><length>1.0</length></cylinder></geometry></collision>
+        <visual name="p1v"><pose>3 8 0.5 0 0 0</pose>
+          <geometry><cylinder><radius>0.35</radius><length>1.0</length></cylinder></geometry></visual>
+        <collision name="p2"><pose>9 4 0.5 0 0 0</pose>
+          <geometry><cylinder><radius>0.35</radius><length>1.0</length></cylinder></geometry></collision>
+        <visual name="p2v"><pose>9 4 0.5 0 0 0</pose>
+          <geometry><cylinder><radius>0.35</radius><length>1.0</length></cylinder></geometry></visual>
+        <collision name="p3"><pose>9.5 9.5 0.5 0 0 0</pose>
+          <geometry><box><size>1.2 0.8 1.0</size></box></geometry></collision>
+        <visual name="p3v"><pose>9.5 9.5 0.5 0 0 0</pose>
+          <geometry><box><size>1.2 0.8 1.0</size></box></geometry></visual>
+      </link>
+    </model>
+  </world>
+</sdf>

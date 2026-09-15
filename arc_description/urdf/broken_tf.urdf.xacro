@@ -1,0 +1,12 @@
+<?xml version="1.0"?>
+<!-- Lab 2, Exercise 2.3. The whole robot, with one deliberate transform fault.
+     Do not read this file looking for the mistake. Run it and diagnose it:
+
+       ros2 launch arc_description display.launch.py model:=broken_tf.urdf.xacro
+       ros2 run tf2_tools view_frames
+       ros2 run tf2_ros tf2_echo base_link laser_link
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="arc_bot">
+  <xacro:include filename="$(find arc_description)/urdf/arc_bot.urdf.xacro"
+                 tf_fault="parent"/>
+</robot>

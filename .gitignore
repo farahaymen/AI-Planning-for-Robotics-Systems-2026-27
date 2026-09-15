@@ -1,0 +1,23 @@
+# build artifacts
+build/
+install/
+log/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# generated, reproducible from source
+docs/figures/*.png
+results/*.json
+
+# large and machine specific
+bags/
+models/*.zip
+maps/*.pgm
+*.mcap
+*.ova
+*.vdi
+
+# editors
+.vscode/
+.idea/

@@ -1,0 +1,10 @@
+system_label: gap_follow_classical
+scenario: training_grammar_seeds_0_9
+env_factory: arc_rl.nav_core:FastNavEnv
+env_args:
+  scenario_factory: arc_rl.arenas:training_scenario
+  randomise_start: false
+policy_factory: arc_rl.baselines:make_gap_follow_policy
+seeds: [0,1,2,3,4,5,6,7,8,9]
+max_steps: 900
+out: results/gap_follow.json

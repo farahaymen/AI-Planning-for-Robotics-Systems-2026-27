@@ -1,0 +1,293 @@
+#!/usr/bin/env python3
+"""
+course-smoke-test - does the robot actually work?
+
+course-check verifies that things are PRESENT. This verifies that they WORK.
+The distinction matters: every package can be installed correctly and the robot
+can still fail to move because a controller never activated or a bridge topic was
+never declared.
+
+Each check asserts an observable behaviour and reports the measured value, so a
+failure says what was wrong rather than that something was.
+
+    course-smoke-test              full test, about 90 seconds
+    course-smoke-test --headless   no Gazebo GUI, for graphics Tier B
+    course-smoke-test --json       machine readable
+
+Exit 0 only if every required check passes.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import math
+import os
+import signal
+import subprocess
+import sys
+import time
+from dataclasses import dataclass, asdict
+from datetime import datetime, timezone
+from pathlib import Path
+
+RESET = "\033[0m"
+COLOURS = {"PASS": "\033[32m", "FAIL": "\033[31m", "WARN": "\033[33m"}
+
+LAUNCH = ["ros2", "launch", "arc_gazebo", "simulation.launch.py"]
+SETTLE_S = 25.0          # Gazebo, the controllers and TF all need time
+RATE_TOLERANCE = 0.25    # fraction
+
+
+@dataclass
+class Check:
+    name: str
+    status: str
+    observed: str
+    expected: str = ""
+    required: bool = True
+
+
+class Smoke:
+    def __init__(self, headless: bool):
+        self.headless = headless
+        self.checks: list[Check] = []
+        self.sim = None
+
+    def add(self, name, ok, observed, expected="", required=True):
+        # A failing optional check is a WARN, not a FAIL. Showing it red would
+        # tell a demonstrator the environment is broken when it is merely untidy.
+        status = "PASS" if ok else ("FAIL" if required else "WARN")
+        self.checks.append(Check(name, status, str(observed), expected, required))
+        return ok
+
+    # -- process control ----------------------------------------------------
+
+    def start_simulation(self) -> bool:
+        cmd = LAUNCH + (["headless:=true"] if self.headless else [])
+        # New process group, so the whole launch tree can be torn down. Orphaned
+        # gz processes are a frequent cause of the next session behaving oddly.
+        self.sim = subprocess.Popen(cmd, stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.DEVNULL,
+                                    preexec_fn=os.setsid)
+        deadline = time.time() + SETTLE_S
+        while time.time() < deadline:
+            if self.sim.poll() is not None:
+                return self.add("simulation launches", False, "exited early")
+            if "/scan" in self._topics():
+                time.sleep(4.0)      # let the controllers finish activating
+                return self.add("simulation launches", True, "running")
+            time.sleep(1.0)
+        return self.add("simulation launches", False, f"no /scan after {SETTLE_S:.0f}s")
+
+    def stop_simulation(self) -> None:
+        if self.sim is None:
+            return
+        try:
+            os.killpg(os.getpgid(self.sim.pid), signal.SIGINT)
+            self.sim.wait(timeout=15)
+        except Exception:
+            try:
+                os.killpg(os.getpgid(self.sim.pid), signal.SIGKILL)
+            except Exception:
+                pass
+        time.sleep(2.0)
+        leftover = self._run(["pgrep", "-fa", "gz sim"], timeout=5)[1]
+        self.add("clean teardown, no orphan processes", not leftover.strip(),
+                 "clean" if not leftover.strip() else "gz still running",
+                 required=False)
+
+    # -- helpers ------------------------------------------------------------
+
+    @staticmethod
+    def _run(cmd, timeout=20):
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=timeout, check=False)
+            return p.returncode, (p.stdout + p.stderr)
+        except subprocess.TimeoutExpired as exc:
+            return 124, (exc.stdout or b"").decode() if isinstance(exc.stdout, bytes) else ""
+        except FileNotFoundError:
+            return 127, ""
+
+    def _topics(self) -> list[str]:
+        return self._run(["ros2", "topic", "list"], timeout=15)[1].split()
+
+    def _hz(self, topic: str, window: int = 12) -> float:
+        """Measure a publication rate. ros2 topic hz runs until interrupted."""
+        proc = subprocess.Popen(["ros2", "topic", "hz", topic, "--window", str(window)],
+                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                text=True, preexec_fn=os.setsid)
+        rate = 0.0
+        deadline = time.time() + 12
+        try:
+            while time.time() < deadline:
+                line = proc.stdout.readline()
+                if "average rate:" in line:
+                    rate = float(line.split("average rate:")[1].strip())
+                    break
+        finally:
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGINT)
+                proc.wait(timeout=5)
+            except Exception:
+                pass
+        return rate
+
+    def _echo_once(self, topic: str, field: str = "") -> str:
+        cmd = ["ros2", "topic", "echo", "--once", topic]
+        if field:
+            cmd += ["--field", field]
+        return self._run(cmd, timeout=20)[1].strip()
+
+    # -- the checks ---------------------------------------------------------
+
+    def check_topics(self):
+        topics = self._topics()
+        for topic in ("/scan", "/odom", "/imu", "/cmd_vel", "/tf", "/clock"):
+            self.add(f"topic {topic} exists", topic in topics,
+                     "present" if topic in topics else "missing")
+
+    def check_rates(self):
+        for topic, expected in (("/scan", 10.0), ("/odom", 50.0), ("/imu", 100.0)):
+            rate = self._hz(topic)
+            ok = abs(rate - expected) <= RATE_TOLERANCE * expected
+            self.add(f"{topic} rate", ok, f"{rate:.1f} Hz",
+                     f"{expected:.0f} Hz +/- {RATE_TOLERANCE*100:.0f}%")
+
+    def check_clock(self):
+        """A simulated system must run on simulation time, not the wall clock."""
+        first = self._echo_once("/clock", "clock.sec")
+        time.sleep(2.0)
+        second = self._echo_once("/clock", "clock.sec")
+        try:
+            advanced = int(second) > int(first)
+            small = int(second) < 1_000_000        # not a Unix timestamp
+        except ValueError:
+            advanced = small = False
+        self.add("/clock advances", advanced, f"{first} then {second}")
+        self.add("/clock is simulation time, not wall clock", small,
+                 f"{second}", "a small number of seconds since start")
+
+    def check_tf(self):
+        for parent, child in (("odom", "base_footprint"), ("base_link", "laser_link")):
+            code, out = self._run(
+                ["ros2", "run", "tf2_ros", "tf2_echo", parent, child], timeout=12)
+            ok = "Translation" in out
+            self.add(f"TF {parent} to {child}", ok,
+                     "resolves" if ok else "lookup failed")
+
+    def check_controllers(self):
+        code, out = self._run(["ros2", "control", "list_controllers"], timeout=20)
+        for name in ("diff_drive_controller", "joint_state_broadcaster"):
+            ok = name in out and "active" in out
+            self.add(f"controller {name} active", ok,
+                     "active" if ok else "not active or not loaded")
+
+    def check_robot_moves(self):
+        """The one that matters. Command a velocity, measure real displacement."""
+        before = self._odom_xy()
+        publisher = subprocess.Popen(
+            ["ros2", "topic", "pub", "-r", "10", "/cmd_vel", "geometry_msgs/msg/Twist",
+             "{linear: {x: 0.2}, angular: {z: 0.0}}"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, preexec_fn=os.setsid)
+        time.sleep(5.0)
+        try:
+            os.killpg(os.getpgid(publisher.pid), signal.SIGINT)
+            publisher.wait(timeout=5)
+        except Exception:
+            pass
+        time.sleep(1.5)
+        after = self._odom_xy()
+
+        if before is None or after is None:
+            return self.add("robot moves on /cmd_vel", False, "no odometry")
+        moved = math.hypot(after[0] - before[0], after[1] - before[1])
+        # 0.2 m/s for 5 s is 1.0 m. Accept 0.3 m: the point is that it moved at
+        # all and in roughly the right amount, not that the physics is exact.
+        self.add("robot moves on /cmd_vel", moved > 0.3, f"{moved:.2f} m",
+                 "more than 0.30 m")
+
+    def _odom_xy(self):
+        out = self._echo_once("/odom", "pose.pose.position")
+        x = y = None
+        for line in out.splitlines():
+            if line.strip().startswith("x:"):
+                x = float(line.split(":")[1])
+            elif line.strip().startswith("y:"):
+                y = float(line.split(":")[1])
+        return (x, y) if x is not None and y is not None else None
+
+    def check_scan_values(self):
+        out = self._echo_once("/scan", "ranges")
+        ok = out and any(ch.isdigit() for ch in out)
+        self.add("/scan carries real values", bool(ok),
+                 "populated" if ok else "empty or all invalid")
+
+    # -- reporting ----------------------------------------------------------
+
+    def report(self, as_json: bool) -> int:
+        failed = [c for c in self.checks if c.status == "FAIL" and c.required]
+        payload = {
+            "generated_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "vm_release": os.environ.get("ARC_VM_RELEASE", "unset"),
+            "seat": os.environ.get("ARC_SEAT_ID", "unset"),
+            "headless": self.headless,
+            "passed": not failed,
+            "checks": [asdict(c) for c in self.checks],
+        }
+        try:
+            d = Path.home() / "arc_ws" / ".arc"
+            d.mkdir(parents=True, exist_ok=True)
+            stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+            (d / f"smoke-{stamp}.json").write_text(json.dumps(payload, indent=2))
+        except OSError:
+            pass
+
+        if as_json:
+            print(json.dumps(payload, indent=2))
+            return 0 if not failed else 1
+
+        width = max(len(c.name) for c in self.checks) + 2
+        print(f"\nARC smoke test  release {payload['vm_release']}  "
+              f"{'headless' if self.headless else 'with GUI'}\n")
+        for c in self.checks:
+            detail = c.observed
+            if c.expected and c.status == "FAIL":
+                detail += f"  (expected {c.expected})"
+            print(f"  {c.name.ljust(width)}{COLOURS.get(c.status,'')}{c.status:<5}{RESET} {detail}")
+        if failed:
+            print(f"\n  {len(failed)} required check(s) failed. "
+                  f"The environment is NOT ready for students.\n")
+            return 1
+        print("\n  The robot spawns, senses and moves. Environment ready.\n")
+        return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="ARC behavioural smoke test")
+    parser.add_argument("--headless", action="store_true")
+    parser.add_argument("--json", action="store_true")
+    args = parser.parse_args()
+
+    smoke = Smoke(args.headless)
+    try:
+        if smoke.start_simulation():
+            smoke.check_topics()
+            smoke.check_clock()
+            smoke.check_rates()
+            smoke.check_scan_values()
+            smoke.check_tf()
+            smoke.check_controllers()
+            smoke.check_robot_moves()
+    finally:
+        smoke.stop_simulation()
+    return smoke.report(args.json)
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        print("\ninterrupted")
+        sys.exit(2)

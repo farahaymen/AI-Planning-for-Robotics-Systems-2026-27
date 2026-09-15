@@ -1,0 +1,43 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <!--
+    The hardware abstraction boundary. In simulation the plugin is
+    gz_ros2_control. On a physical robot only this block changes; the controller
+    configuration, the Nav2 stack and every node above it stay identical. That
+    substitutability is the whole point of ros2_control and it is worth pausing
+    on when you read this file.
+  -->
+  <ros2_control name="ArcBotSystem" type="system">
+    <hardware>
+      <plugin>gz_ros2_control/GazeboSimSystem</plugin>
+    </hardware>
+    <joint name="left_wheel_joint">
+      <!-- 20 rad/s, not 10. At the robot's maximum linear AND angular velocity
+           together the outer wheel needs 16.3 rad/s:
+             (0.50 + 1.80 * 0.350/2) / 0.050 = 16.3
+           A limit below that saturates silently and the robot turns more slowly
+           than commanded, which looks like a controller tuning fault and is not.
+           starters/lab02/tests/test_diffdrive.py asserts this stays consistent. -->
+      <command_interface name="velocity">
+        <param name="min">-20.0</param>
+        <param name="max">20.0</param>
+      </command_interface>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+    <joint name="right_wheel_joint">
+      <!-- 20 rad/s, not 10. At the robot's maximum linear AND angular velocity
+           together the outer wheel needs 16.3 rad/s:
+             (0.50 + 1.80 * 0.350/2) / 0.050 = 16.3
+           A limit below that saturates silently and the robot turns more slowly
+           than commanded, which looks like a controller tuning fault and is not.
+           starters/lab02/tests/test_diffdrive.py asserts this stays consistent. -->
+      <command_interface name="velocity">
+        <param name="min">-20.0</param>
+        <param name="max">20.0</param>
+      </command_interface>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+  </ros2_control>
+</robot>

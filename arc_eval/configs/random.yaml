@@ -1,0 +1,9 @@
+system_label: random_baseline
+scenario: training_room_00
+env_factory: arc_rl.nav_core:FastNavEnv
+env_args: {randomise_start: false}
+policy_factory: arc_rl.baselines:make_random_policy
+policy_args: {}
+seeds: [0,1,2,3,4,5,6,7,8,9]
+max_steps: 600
+out: results/random.json

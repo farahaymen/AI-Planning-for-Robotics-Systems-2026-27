@@ -1,0 +1,19 @@
+# Runs the part of the suite that needs no ROS, on every push. Catches the class
+# of error that unit tests catch: a broken sensor model, a scoring formula that
+# rewards the wrong behaviour, an arena the robot cannot fit through.
+name: tests
+
+on: [push, pull_request]
+
+jobs:
+  offline-tests:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install "numpy<2" gymnasium pyyaml pytest pillow matplotlib
+      - name: Run the offline suite
+        run: python -m pytest starters arc_eval -q

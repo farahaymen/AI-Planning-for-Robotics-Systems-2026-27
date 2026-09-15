@@ -1,0 +1,73 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <!-- Fault values are resolved in arc_bot.urdf.xacro. Each is a single
+       parameter change, so the robot stays otherwise healthy and the exercise
+       is a diagnosis rather than a hunt. -->
+  <xacro:property name="scan_rate"   value="${3   if fault == 'a' else 10}"/>
+  <xacro:property name="scan_frame"  value="${'laser_link_v2' if fault == 'b' else 'laser_link'}"/>
+  <xacro:property name="scan_noise"  value="${1.0 if fault == 'c' else 0.01}"/>
+
+  <gazebo>
+    <plugin filename="gz_ros2_control-system"
+            name="gz_ros2_control::GazeboSimROS2ControlPlugin">
+      <parameters>$(find arc_description)/config/arc_bot_controllers.yaml</parameters>
+    </plugin>
+    <plugin filename="gz-sim-sensors-system" name="gz::sim::systems::Sensors">
+      <render_engine>ogre2</render_engine>
+    </plugin>
+    <plugin filename="gz-sim-imu-system" name="gz::sim::systems::Imu"/>
+  </gazebo>
+
+  <!-- LiDAR. Rate, range and sample count are course constants; changing them
+       invalidates every trained policy and every recorded benchmark. -->
+  <gazebo reference="laser_link">
+    <sensor name="arc_lidar" type="gpu_lidar">
+      <topic>scan</topic>
+      <update_rate>${scan_rate}</update_rate>
+      <always_on>true</always_on>
+      <visualize>false</visualize>
+      <gz_frame_id>${scan_frame}</gz_frame_id>
+      <lidar>
+        <scan>
+          <horizontal>
+            <samples>360</samples>
+            <resolution>1</resolution>
+            <min_angle>-3.141592</min_angle>
+            <max_angle>3.141592</max_angle>
+          </horizontal>
+        </scan>
+        <range>
+          <min>0.12</min>
+          <max>12.0</max>
+          <resolution>0.01</resolution>
+        </range>
+        <noise>
+          <type>gaussian</type>
+          <mean>0.0</mean>
+          <stddev>${scan_noise}</stddev>
+        </noise>
+      </lidar>
+    </sensor>
+  </gazebo>
+
+  <gazebo reference="imu_link">
+    <sensor name="arc_imu" type="imu">
+      <topic>imu</topic>
+      <update_rate>100</update_rate>
+      <always_on>true</always_on>
+      <gz_frame_id>imu_link</gz_frame_id>
+    </sensor>
+  </gazebo>
+
+  <gazebo reference="left_wheel_link">
+    <mu1>1.0</mu1><mu2>1.0</mu2>
+  </gazebo>
+  <gazebo reference="right_wheel_link">
+    <mu1>1.0</mu1><mu2>1.0</mu2>
+  </gazebo>
+  <gazebo reference="caster_link">
+    <mu1>0.0</mu1><mu2>0.0</mu2>
+  </gazebo>
+
+</robot>
