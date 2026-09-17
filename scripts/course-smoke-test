@@ -65,6 +65,40 @@ class Smoke:
 
     # -- process control ----------------------------------------------------
 
+    # Nodes a launch owns. Seeing any of these BEFORE launching means a
+    # previous run is still alive.
+    LAUNCH_OWNED_NODES = ("robot_state_publisher", "ros_gz_bridge",
+                          "controller_manager", "gz_ros_control")
+
+    def preflight(self) -> bool:
+        """Refuse to run if a previous launch is still alive.
+
+        This exists because of a real failure: a backgrounded launch left
+        robot_state_publisher and parameter_bridge running, the usual
+        `pkill -f "gz sim"` did not touch them, and every later run measured
+        /scan at exactly double its rate with two publishers. The measurement
+        was correct and meaningless.
+
+        It checks live ROS NODES rather than process names. Matching process
+        names with `pgrep -f` also matches an editor with the file open, or
+        this script itself, and a false refusal is worse than no check.
+        """
+        nodes = self._run(["ros2", "node", "list"], timeout=15)[1].split()
+        stale = [n for n in nodes
+                 if any(owned in n for owned in self.LAUNCH_OWNED_NODES)]
+        if stale:
+            print("\nREFUSING TO RUN: nodes from an earlier launch are still alive:")
+            for node in sorted(set(stale)):
+                print(f"    {node}")
+            print("\nThese keep publishing, so every bridged topic would be measured")
+            print("at double its true rate. Clear them first:\n")
+            print("    arc-clean\n")
+            self.add("preflight: no stale nodes", False,
+                     f"{len(set(stale))} stale node(s): {', '.join(sorted(set(stale))[:3])}")
+            return False
+        self.add("preflight: no stale nodes", True, "clean")
+        return True
+
     def start_simulation(self) -> bool:
         cmd = LAUNCH + (["headless:=true"] if self.headless else [])
         # New process group, so the whole launch tree can be torn down. Orphaned
@@ -339,7 +373,7 @@ def main() -> int:
 
     smoke = Smoke(args.headless)
     try:
-        if smoke.start_simulation():
+        if smoke.preflight() and smoke.start_simulation():
             smoke.check_topics()
             smoke.check_clock()
             smoke.check_rates()

@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# arc-clean - stop every process a course launch starts.
+#
+# `pkill -f "gz sim"` is NOT enough and is the cause of a confusing class of
+# failure. A launch starts several SEPARATE processes:
+#
+#   gazebo (ruby wrapper)     <- killed by pkill -f "gz sim"
+#   robot_state_publisher     <- survives
+#   parameter_bridge          <- survives
+#   controller spawners       <- survive
+#
+# The survivors keep publishing. A second launch then adds its own, so /scan and
+# /imu arrive twice and `ros2 topic info` reports two publishers. The rate looks
+# exactly doubled and nothing in the launch output hints at why.
+#
+#     arc-clean          stop everything
+#     arc-clean --check  list what is still running, change nothing
+set -uo pipefail
+
+PATTERNS=(
+  "gz sim"
+  "gz-sim"
+  "ruby /opt/ros"
+  "robot_state_publisher"
+  "parameter_bridge"
+  "ros_gz_bridge"
+  "controller_manager/spawner"
+  "rviz2"
+  "ros2 launch arc_"
+)
+
+if [[ "${1:-}" == "--check" ]]; then
+  found=0
+  for p in "${PATTERNS[@]}"; do
+    if pgrep -fa "$p" >/dev/null 2>&1; then
+      pgrep -fa "$p"
+      found=1
+    fi
+  done
+  [[ $found -eq 0 ]] && echo "clean: nothing from a course launch is running"
+  exit $found
+fi
+
+for p in "${PATTERNS[@]}"; do pkill -f "$p" 2>/dev/null; done
+sleep 2
+# Anything that ignored SIGTERM gets SIGKILL. A wedged Gazebo occasionally does.
+for p in "${PATTERNS[@]}"; do pkill -9 -f "$p" 2>/dev/null; done
+sleep 1
+
+remaining=$(ros2 node list 2>/dev/null | grep -v "^$" | wc -l)
+if [[ "$remaining" -gt 0 ]]; then
+  echo "warning: $remaining ROS node(s) still visible:"
+  ros2 node list 2>/dev/null
+  echo "If these persist, they belong to another terminal or another domain."
+else
+  echo "clean: no course processes and no ROS nodes remaining"
+fi
