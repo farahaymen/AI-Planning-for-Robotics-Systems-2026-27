@@ -278,6 +278,22 @@ class Smoke:
             self.add(f"TF {parent} to {child}", ok,
                      "resolves" if ok else "lookup failed")
 
+    def check_relay(self):
+        """cmd_vel_relay must be running, or nothing unstamped reaches the wheels."""
+        nodes = self._run(["ros2", "node", "list"], timeout=15)[1]
+        running = "cmd_vel_relay" in nodes
+        self.add("cmd_vel_relay running", running,
+                 "running" if running else
+                 "absent - unstamped Twist will not reach the controller")
+
+    def check_cmd_vel_types(self):
+        """Two types on one topic is the silent failure this relay exists for."""
+        out = self._run(["ros2", "topic", "info", "/cmd_vel"], timeout=10)[1]
+        mixed = "TwistStamped" in out and "msg/Twist'" in out.replace('"', "'")
+        self.add("/cmd_vel has a single message type", not mixed,
+                 "mixed Twist and TwistStamped" if mixed else "consistent",
+                 required=False)
+
     def check_controllers(self):
         code, out = self._run(["ros2", "control", "list_controllers"], timeout=20)
         for name in ("diff_drive_controller", "joint_state_broadcaster"):
@@ -286,7 +302,13 @@ class Smoke:
                      "active" if ok else "not active or not loaded")
 
     def check_robot_moves(self):
-        """The one that matters. Command a velocity, measure real displacement."""
+        """The one that matters. Command a velocity, measure real displacement.
+
+        Publishes an unstamped Twist on purpose. That is what teleop, Nav2 and
+        every course node send, and it only reaches the controller through
+        cmd_vel_relay. Publishing TwistStamped here would pass while the path
+        students actually use stayed broken.
+        """
         before = self._odom_xy()
         publisher = subprocess.Popen(
             ["ros2", "topic", "pub", "-r", "10", "/cmd_vel", "geometry_msgs/msg/Twist",
@@ -380,6 +402,8 @@ def main() -> int:
             smoke.check_scan_values()
             smoke.check_tf()
             smoke.check_controllers()
+            smoke.check_relay()
+            smoke.check_cmd_vel_types()
             smoke.check_robot_moves()
     finally:
         smoke.stop_simulation()

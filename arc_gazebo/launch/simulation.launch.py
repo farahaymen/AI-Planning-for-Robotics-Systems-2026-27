@@ -87,14 +87,23 @@ def launch_setup(context, *args, **kwargs):
     # Remapping the SPAWNER does nothing: it is a separate short-lived process
     # that only calls services. The controller itself lives inside the
     # controller manager, so the remap must be forwarded to it directly.
+    #
+    # Only odom is remapped. cmd_vel is deliberately left at its namespaced
+    # default because this version of diff_drive_controller subscribes to
+    # TwistStamped, while teleop_twist_keyboard, Nav2 and every node in this
+    # course publish an unstamped Twist. cmd_vel_relay below converts at the
+    # boundary; see its docstring for why that beats rewriting six publishers.
     diff_drive = Node(
         package="controller_manager", executable="spawner", output="screen",
         arguments=["diff_drive_controller", "--controller-ros-args",
-                   "-r /diff_drive_controller/cmd_vel:=/cmd_vel "
                    "-r /diff_drive_controller/odom:=/odom"])
 
+    cmd_vel_relay = Node(
+        package="arc_gazebo", executable="cmd_vel_relay.py", output="screen",
+        parameters=[{"use_sim_time": True}])
+
     return [
-        gz, gz_gui, state_publisher, bridge, spawn,
+        gz, gz_gui, state_publisher, bridge, spawn, cmd_vel_relay,
         RegisterEventHandler(OnProcessExit(target_action=spawn,
                                            on_exit=[joint_state])),
         RegisterEventHandler(OnProcessExit(target_action=joint_state,

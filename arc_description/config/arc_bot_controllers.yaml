@@ -25,7 +25,11 @@ diff_drive_controller:
     base_frame_id: base_footprint
     enable_odom_tf: true
     open_loop: false
-    use_stamped_vel: false
+    # NOTE: use_stamped_vel was REMOVED from diff_drive_controller in this
+    # version. The controller now subscribes to TwistStamped only, and setting
+    # that parameter here was silently ignored. arc_gazebo's cmd_vel_relay
+    # converts the unstamped Twist that teleop, Nav2 and the course code all
+    # publish. Do not re-add the parameter; it does nothing.
 
     linear.x.has_velocity_limits: true
     linear.x.max_velocity: 0.50

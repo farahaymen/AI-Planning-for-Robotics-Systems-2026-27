@@ -12,4 +12,13 @@ install(DIRECTORY launch DESTINATION share/${PROJECT_NAME})
 install(DIRECTORY config DESTINATION share/${PROJECT_NAME})
 install(DIRECTORY rviz DESTINATION share/${PROJECT_NAME})
 
+# cmd_vel_relay is a Python node in an ament_cmake package. install(PROGRAMS)
+# puts it on the lib path so `ros2 run arc_gazebo cmd_vel_relay.py` resolves,
+# without turning this package into ament_python or adding a package solely for
+# one node.
+install(PROGRAMS
+  scripts/cmd_vel_relay.py
+  DESTINATION lib/${PROJECT_NAME}
+)
+
 ament_package()

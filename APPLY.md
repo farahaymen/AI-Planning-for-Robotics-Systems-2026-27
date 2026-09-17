@@ -1,74 +1,109 @@
-# Fix round 2: stale processes, not a launch bug
+# Fix round 3: the robot would not move
 
-## What was actually wrong
-
-My previous diagnosis was wrong. The duplicated nodes were not caused by the
-launch file structure. The evidence:
+## What was wrong
 
 ```
-/controller_manager        x1    lives INSIDE the gazebo process
-/gz_ros_control            x1    inside gazebo
-/diff_drive_controller     x1    inside gazebo
-/joint_state_broadcaster   x1    inside gazebo
-/robot_state_publisher     x2    SEPARATE process
-/ros_gz_bridge             x2    SEPARATE process
+$ ros2 topic info /cmd_vel
+Type: ['geometry_msgs/msg/Twist', 'geometry_msgs/msg/TwistStamped']
+Publisher count: 1
+Subscription count: 1
 ```
 
-The nodes that duplicated are exactly the ones that live in their own process.
-`pkill -f "gz sim"` kills only Gazebo, so `robot_state_publisher` and
-`parameter_bridge` from an earlier launch survived and kept publishing. Every
-new launch added another set. Two bridges publishing `/scan` is why it measured
-20 Hz with 2 publishers, and `/imu` 200 Hz.
+Two message types on one topic. The publisher was sending `Twist`; the
+controller was listening for `TwistStamped`. They never connected, so the
+controller received nothing and kept braking.
 
-The launch file needs no change.
-
-## Two files
+`diff_drive_controller` in this version subscribes to **TwistStamped only**. The
+`use_stamped_vel` parameter that used to select the unstamped form has been
+removed, confirmed by:
 
 ```
-scripts/arc-clean            new: stops every process a launch starts
-scripts/course-smoke-test    updated: refuses to run when stale nodes exist
+$ ros2 param list /diff_drive_controller | grep -i stamp
+  twist_covariance_diagonal
 ```
 
-Copy into your Windows clone, then:
+Our config set `use_stamped_vel: false` and it was silently ignored.
+
+## Why this mattered beyond one test
+
+Almost everything in the course publishes an unstamped `Twist`:
+
+| Publisher | Used in |
+|---|---|
+| `teleop_twist_keyboard` | Lab 3 driving, Lab 5 mapping run |
+| `arc_lab5 drift_meter` | Lab 2 and Lab 5 odometry measurement |
+| `arc_rl RosNavEnv` | Lab 9 and Lab 10 policy execution |
+| Nav2 `controller_server` | Lab 6 onward |
+
+All four would have failed the same silent way. `teleop_twist_keyboard` is not
+ours to change, so switching everything to TwistStamped was not an option.
+
+## The fix: convert at the boundary
 
 ```
+anything --Twist--> /cmd_vel --[cmd_vel_relay]--> TwistStamped --> controller
+```
+
+One small node fills in the header stamp, which is the only thing the unstamped
+message lacks. Everything else keeps publishing the type it already publishes,
+and `/cmd_vel` keeps the type students see in every tutorial.
+
+## Files
+
+```
+arc_gazebo/scripts/cmd_vel_relay.py            new
+arc_gazebo/CMakeLists.txt                      installs the relay
+arc_gazebo/launch/simulation.launch.py         starts it; cmd_vel remap removed
+arc_description/config/arc_bot_controllers.yaml  dead parameter removed
+scripts/course-smoke-test                      checks the relay and the type
+scripts/arc-clean                              from round 2, include if not yet pushed
+```
+
+## Apply
+
+On Windows, from your clone:
+
+```
+xcopy /E /Y "%USERPROFILE%\Desktop\arc-fixes-3\arc_gazebo"      arc_gazebo\
+xcopy /E /Y "%USERPROFILE%\Desktop\arc-fixes-3\arc_description" arc_description\
+xcopy /E /Y "%USERPROFILE%\Desktop\arc-fixes-3\scripts"         scripts\
+
 git add -A
-git commit -m "Add arc-clean; smoke test refuses to run with stale nodes"
+git commit -m "Add cmd_vel_relay: diff_drive_controller is TwistStamped-only"
 git push
 ```
 
-## On the VM, after pulling
+On the VM:
 
 ```bash
 cd ~/arc_ws/src/arc-course && git pull
-sudo install -m 0755 scripts/arc-clean        /usr/local/bin/arc-clean
+sudo install -m 0755 scripts/arc-clean         /usr/local/bin/arc-clean
 sudo install -m 0755 scripts/course-smoke-test /usr/local/bin/course-smoke-test
+cd ~/arc_ws && colcon build --symlink-install && source install/setup.bash
 ```
 
-## Use this from now on
+A rebuild is required this time: `install(PROGRAMS)` is a CMake change, so
+`--symlink-install` alone will not place the new script.
 
-Replace `pkill -f "gz sim"` everywhere with:
+## Verify
 
 ```bash
-arc-clean            # stop everything a launch started
-arc-clean --check    # list what is still running, change nothing
+arc-clean
+ros2 launch arc_gazebo simulation.launch.py headless:=true
 ```
 
-## Two habits worth keeping
-
-**Never background a launch with `&`.** That is how the orphans were created.
-Use a separate terminal tab instead.
-
-**Always use `timeout` with `--once`.** `ros2 topic echo /clock --once` blocks
-forever when nothing is publishing, which looks like a hang:
+Then, in another terminal:
 
 ```bash
-timeout 5 ros2 topic echo /clock --field clock.sec --once
+ros2 topic info /cmd_vel          # ONE type now, geometry_msgs/msg/Twist
+ros2 node list | grep relay       # /cmd_vel_relay
+ros2 topic pub -r 10 /cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.2}}"
 ```
 
-## The preflight check
+The braking messages should stop and `/odom` x should climb by about 0.2 per
+second. Then:
 
-`course-smoke-test` now lists live ROS nodes before launching anything and
-refuses to run if a previous launch is still alive. It checks nodes rather than
-process names on purpose: `pgrep -f robot_state_publisher` also matches a text
-editor with that file open, and a false refusal is worse than no check.
+```bash
+arc-clean
+course-smoke-test --headless
+```
