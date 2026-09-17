@@ -83,9 +83,30 @@ class Smoke:
         names with `pgrep -f` also matches an editor with the file open, or
         this script itself, and a false refusal is worse than no check.
         """
+        # Restart the daemon first. It caches the node graph, so a node that
+        # was killed seconds ago can still be listed, and refusing to run over
+        # a node that no longer exists is worse than not checking at all.
+        self._run(["ros2", "daemon", "stop"], timeout=10)
+        time.sleep(1.0)
         nodes = self._run(["ros2", "node", "list"], timeout=15)[1].split()
         stale = [n for n in nodes
                  if any(owned in n for owned in self.LAUNCH_OWNED_NODES)]
+
+        # Confirm against the process table before refusing. The node list is
+        # the daemon's view; processes are the truth. Only refuse when both
+        # agree that something is still alive.
+        if stale:
+            alive = []
+            for node in set(stale):
+                name = node.lstrip("/")
+                code, out = self._run(["pgrep", "-f", name], timeout=5)
+                if code == 0 and out.strip():
+                    alive.append(node)
+            if not alive:
+                self.add("preflight: no stale nodes", True,
+                         "clean (daemon listed stale entries; no processes)")
+                return True
+            stale = alive
         if stale:
             print("\nREFUSING TO RUN: nodes from an earlier launch are still alive:")
             for node in sorted(set(stale)):
@@ -342,10 +363,31 @@ class Smoke:
         return (x, y) if x is not None and y is not None else None
 
     def check_scan_values(self):
+        """A scan can be populated and still be meaningless.
+
+        When the LiDAR sits inside geometry, every beam returns the configured
+        minimum range. `ros2 topic hz` is perfect, the message is full of
+        numbers, and the robot is effectively blind. Checking only that values
+        exist passes this. Checking the SPREAD catches it.
+        """
+        import re
         out = self._echo_once("/scan", "ranges")
-        ok = out and any(ch.isdigit() for ch in out)
-        self.add("/scan carries real values", bool(ok),
-                 "populated" if ok else "empty or all invalid")
+        values = [float(v) for v in re.findall(r"\d+\.\d+(?:e[+-]\d+)?", out)]
+        finite = [v for v in values if 0.0 < v < 1e6]
+
+        if not finite:
+            return self.add("/scan carries real values", False, "empty or all invalid")
+
+        low, high = min(finite), max(finite)
+        # The reference world is 12 m across and the robot spawns 1 m from two
+        # walls, so a healthy scan spans roughly 0.9 m to 11 m. Demanding only
+        # that the furthest return exceeds 1 m keeps this robust to where the
+        # robot happens to be while still catching a sensor inside geometry.
+        ok = high > 1.0 and (high - low) > 0.5
+        detail = f"min {low:.2f} m, max {high:.2f} m"
+        if not ok:
+            detail += " - every beam reads the same, the LiDAR is inside geometry"
+        self.add("/scan sees the room", ok, detail, "a spread of ranges, max above 1 m")
 
     # -- reporting ----------------------------------------------------------
 

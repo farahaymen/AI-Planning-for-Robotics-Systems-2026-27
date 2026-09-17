@@ -45,7 +45,8 @@ if [[ "${1:-}" == "--check" ]]; then
       found=1
     fi
   done
-  [[ $found -eq 0 ]] && echo "clean: nothing from a course launch is running"
+  [[ $found -eq 0 ]] && echo "clean: no course processes running"
+  [[ $found -eq 0 ]] && echo "(this checks PROCESSES; ros2 node list can lag behind)"
   exit $found
 fi
 
@@ -53,6 +54,13 @@ for p in "${PATTERNS[@]}"; do pkill -f "$p" 2>/dev/null; done
 sleep 2
 # Anything that ignored SIGTERM gets SIGKILL. A wedged Gazebo occasionally does.
 for p in "${PATTERNS[@]}"; do pkill -9 -f "$p" 2>/dev/null; done
+sleep 1
+
+# Restart the ROS 2 daemon before checking. The daemon caches the node graph,
+# so a node that has already been killed can still appear in `ros2 node list`
+# for some seconds afterwards. Without this the script reports a stale node it
+# has in fact removed, and the smoke test then refuses to run for no reason.
+ros2 daemon stop >/dev/null 2>&1
 sleep 1
 
 remaining=$(ros2 node list 2>/dev/null | grep -v "^$" | wc -l)
