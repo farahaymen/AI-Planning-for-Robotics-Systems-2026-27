@@ -19,7 +19,6 @@ setup(
     maintainer_email='farah.aymen@bue.edu.eg',
     description='Lab 1: ROS 2 nodes, QoS and managed lifecycle',
     license='Apache-2.0',
-    tests_require=['pytest'],
     entry_points={
         'console_scripts': [
             'range_source = arc_lab1.range_source:main',

@@ -21,7 +21,6 @@ setup(
     maintainer_email='farah.aymen@bue.edu.eg',
     description='Lab 5: odometry drift measurement and SLAM bring-up',
     license='Apache-2.0',
-    tests_require=['pytest'],
     entry_points={
         'console_scripts': [
             'drift_meter = arc_lab5.drift_meter:main',

@@ -23,7 +23,6 @@ setup(
     maintainer_email='farah.aymen@bue.edu.eg',
     description='Lab 7: deliberately difficult navigation scenarios',
     license='Apache-2.0',
-    tests_require=['pytest'],
     entry_points={
         'console_scripts': [
             'fault_injector = arc_lab7.fault_injector:main',

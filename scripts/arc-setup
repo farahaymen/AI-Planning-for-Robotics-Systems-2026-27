@@ -21,7 +21,7 @@
 set -uo pipefail
 
 # ----- configuration --------------------------------------------------------
-REPO="${ARC_REPO:-https://github.com/farahaymen/AI-Planning-for-Robotics-Systems-2026-27.git}"
+REPO="${ARC_REPO:-https://github.com/YOUR-ORG/arc-course.git}"
 WS="$HOME/arc_ws"
 SRC="$WS/src/arc-course"
 
@@ -60,7 +60,7 @@ note "done"
 # ----- 1. ROS must be sourced ----------------------------------------------
 if [[ -z "${ROS_DISTRO:-}" ]]; then
   if [[ -f /opt/ros/jazzy/setup.bash ]]; then
-    source /opt/ros/jazzy/setup.bash
+    set +u; source /opt/ros/jazzy/setup.bash; set -u
     note "sourced /opt/ros/jazzy/setup.bash"
   else
     die "ROS 2 Jazzy not found at /opt/ros/jazzy. Run the provisioning stages first."
@@ -122,8 +122,15 @@ fi
 
 say "building"
 cd "$WS" || die "cannot enter $WS"
+# Drop any stale overlay entries from an earlier session, otherwise colcon
+# warns about install paths that no longer exist.
+export AMENT_PREFIX_PATH="$(echo "${AMENT_PREFIX_PATH:-}" | tr ':' '\n' | grep -v "$WS/install" | paste -sd: -)"
+export CMAKE_PREFIX_PATH="$(echo "${CMAKE_PREFIX_PATH:-}" | tr ':' '\n' | grep -v "$WS/install" | paste -sd: -)"
 colcon build --symlink-install || die "build failed. Read the error above; it names the package."
-source "$WS/install/setup.bash"
+# set -u must be off here: colcon's generated setup.bash reads COLCON_TRACE
+# without a default, which is fatal under nounset and kills the script right
+# after a successful build.
+set +u; source "$WS/install/setup.bash"; set -u
 note "$(ls "$WS/install" | grep -c '^arc_') arc packages installed"
 
 # ----- 7. install the course commands --------------------------------------

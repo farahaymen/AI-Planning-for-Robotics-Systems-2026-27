@@ -19,7 +19,6 @@ setup(
     maintainer_email='farah.aymen@bue.edu.eg',
     description='Lab 3: sensor diagnostics and recording',
     license='Apache-2.0',
-    tests_require=['pytest'],
     entry_points={
         'console_scripts': [
             'sensor_doctor = arc_lab3.sensor_doctor:main',

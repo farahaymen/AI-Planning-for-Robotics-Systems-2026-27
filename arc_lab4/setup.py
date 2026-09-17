@@ -19,7 +19,6 @@ setup(
     maintainer_email='farah.aymen@bue.edu.eg',
     description='Lab 4: reading recordings for occupancy mapping',
     license='Apache-2.0',
-    tests_require=['pytest'],
     entry_points={
         'console_scripts': [
             'bag_reader = arc_lab4.bag_reader:main',
