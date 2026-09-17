@@ -27,6 +27,14 @@ PATTERNS=(
   "controller_manager/spawner"
   "rviz2"
   "ros2 launch arc_"
+  # Nodes launched FROM the course workspace. Killing the launch process does
+  # not kill the nodes it spawned, and listing each one by name is a list that
+  # goes stale the moment a lab adds a node. Matching the install path catches
+  # every one of them, now and later.
+  "arc_ws/install"
+  "cmd_vel_relay"
+  "sensor_doctor"
+  "drift_meter"
 )
 
 if [[ "${1:-}" == "--check" ]]; then
