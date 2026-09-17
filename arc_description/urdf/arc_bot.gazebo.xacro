@@ -13,10 +13,11 @@
             name="gz_ros2_control::GazeboSimROS2ControlPlugin">
       <parameters>$(find arc_description)/config/arc_bot_controllers.yaml</parameters>
     </plugin>
-    <plugin filename="gz-sim-sensors-system" name="gz::sim::systems::Sensors">
-      <render_engine>ogre2</render_engine>
-    </plugin>
-    <plugin filename="gz-sim-imu-system" name="gz::sim::systems::Imu"/>
+    <!-- Sensors and Imu are WORLD system plugins, declared once in
+         arc_gazebo/worlds/arc_warehouse.sdf. Declaring them here too loads them
+         twice, Gazebo builds the render scene twice, and Ogre aborts with a
+         duplicate datablock exception that takes the controller manager down
+         with it. -->
   </gazebo>
 
   <!-- LiDAR. Rate, range and sample count are course constants; changing them

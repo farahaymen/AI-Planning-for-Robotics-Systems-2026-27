@@ -9,6 +9,7 @@ produce a wall of confusing errors.
 """
 
 import importlib.util
+import os
 import sys
 import types
 
@@ -77,7 +78,12 @@ def test_path_length_is_metric_not_cell_count():
     assert straight == pytest.approx(0.10, abs=1e-6)
 
 
-@pytest.mark.skipif(not HAS_ROS, reason="ROS 2 not sourced")
+# Needs a LIVE Nav2 stack, not merely a sourced ROS. rclpy being importable says
+# nothing about whether navigate_to_pose is being served, and letting this run in
+# the offline suite costs a 40 second timeout before failing for the wrong reason.
+#     ARC_INTEGRATION=1 pytest starters/lab06/tests -v
+@pytest.mark.skipif(not HAS_ROS or os.environ.get("ARC_INTEGRATION") != "1",
+                    reason="needs a running Nav2 stack; set ARC_INTEGRATION=1")
 def test_nav2_adapter_reports_every_required_key():
     from arc_eval.runner import REQUIRED_INFO_KEYS
     from arc_eval.ros_nav2_env import Nav2EvalEnv

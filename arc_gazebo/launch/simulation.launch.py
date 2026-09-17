@@ -19,6 +19,7 @@ from launch.event_handlers import OnProcessExit
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import Command, LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
 
 FAULTS = {"broken_a": "a", "broken_b": "b", "broken_c": "c"}
@@ -34,10 +35,17 @@ def launch_setup(context, *args, **kwargs):
     desc_share = FindPackageShare("arc_description")
     gz_share = FindPackageShare("arc_gazebo")
 
-    robot_description = Command([
-        "xacro ", PathJoinSubstitution([desc_share, "urdf", "arc_bot.urdf.xacro"]),
-        " fault:=", fault,
-    ])
+    # value_type=str is required. Without it launch tries to parse the URDF as
+    # YAML, which fails because a URDF is full of colons and braces that mean
+    # something else in YAML.
+    robot_description = ParameterValue(
+        Command([
+            "xacro ",
+            PathJoinSubstitution([desc_share, "urdf", "arc_bot.urdf.xacro"]),
+            " fault:=", fault,
+        ]),
+        value_type=str,
+    )
 
     gz_args = [PathJoinSubstitution([gz_share, "worlds", world_file])]
     gz = IncludeLaunchDescription(
@@ -76,8 +84,14 @@ def launch_setup(context, *args, **kwargs):
     # spawner fails in a way that looks like a configuration error.
     joint_state = Node(package="controller_manager", executable="spawner",
                        arguments=["joint_state_broadcaster"], output="screen")
-    diff_drive = Node(package="controller_manager", executable="spawner",
-                      arguments=["diff_drive_controller"], output="screen")
+    # Remapping the SPAWNER does nothing: it is a separate short-lived process
+    # that only calls services. The controller itself lives inside the
+    # controller manager, so the remap must be forwarded to it directly.
+    diff_drive = Node(
+        package="controller_manager", executable="spawner", output="screen",
+        arguments=["diff_drive_controller", "--controller-ros-args",
+                   "-r /diff_drive_controller/cmd_vel:=/cmd_vel "
+                   "-r /diff_drive_controller/odom:=/odom"])
 
     return [
         gz, gz_gui, state_publisher, bridge, spawn,

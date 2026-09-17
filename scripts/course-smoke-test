@@ -52,6 +52,8 @@ class Smoke:
     def __init__(self, headless: bool):
         self.headless = headless
         self.checks: list[Check] = []
+        self.log_file = None
+        self.log_path = None
         self.sim = None
 
     def add(self, name, ok, observed, expected="", required=True):
@@ -67,18 +69,47 @@ class Smoke:
         cmd = LAUNCH + (["headless:=true"] if self.headless else [])
         # New process group, so the whole launch tree can be torn down. Orphaned
         # gz processes are a frequent cause of the next session behaving oddly.
-        self.sim = subprocess.Popen(cmd, stdout=subprocess.DEVNULL,
-                                    stderr=subprocess.DEVNULL,
+        # Capture the output. Discarding it meant a launch failure reported
+        # "exited early" and nothing whatsoever about the cause.
+        self.log_path = Path.home() / "arc_ws" / ".arc" / "last-launch.log"
+        self.log_path.parent.mkdir(parents=True, exist_ok=True)
+        self.log_file = open(self.log_path, "w")
+        self.sim = subprocess.Popen(cmd, stdout=self.log_file,
+                                    stderr=subprocess.STDOUT,
                                     preexec_fn=os.setsid)
         deadline = time.time() + SETTLE_S
         while time.time() < deadline:
             if self.sim.poll() is not None:
-                return self.add("simulation launches", False, "exited early")
+                self.log_file.flush()
+                tail = self.log_path.read_text().strip().splitlines()[-25:]
+                print(f"\n--- launch failed, last 25 lines of {self.log_path} ---")
+                print("\n".join(tail))
+                print("--- end ---\n")
+                return self.add("simulation launches", False,
+                                f"exited early, see {self.log_path}")
             if "/scan" in self._topics():
-                time.sleep(4.0)      # let the controllers finish activating
-                return self.add("simulation launches", True, "running")
+                if self._wait_for_controllers(timeout_s=45.0):
+                    return self.add("simulation launches", True, "running")
+                return self.add("simulation launches", False,
+                                "controllers never became active")
             time.sleep(1.0)
         return self.add("simulation launches", False, f"no /scan after {SETTLE_S:.0f}s")
+
+    def _wait_for_controllers(self, timeout_s: float = 45.0) -> bool:
+        """Block until both controllers report active.
+
+        Nothing downstream works before this: /odom and /cmd_vel do not exist
+        until diff_drive_controller activates, and a fixed sleep is a race that
+        passes on a fast machine and fails on a laboratory PC.
+        """
+        deadline = time.time() + timeout_s
+        while time.time() < deadline:
+            out = self._run(["ros2", "control", "list_controllers"], timeout=10)[1]
+            if out.count("active") >= 2:
+                time.sleep(2.0)
+                return True
+            time.sleep(2.0)
+        return False
 
     def stop_simulation(self) -> None:
         if self.sim is None:
@@ -91,6 +122,8 @@ class Smoke:
                 os.killpg(os.getpgid(self.sim.pid), signal.SIGKILL)
             except Exception:
                 pass
+        if self.log_file is not None:
+            self.log_file.close()
         time.sleep(2.0)
         leftover = self._run(["pgrep", "-fa", "gz sim"], timeout=5)[1]
         self.add("clean teardown, no orphan processes", not leftover.strip(),
@@ -152,19 +185,53 @@ class Smoke:
         for topic, expected in (("/scan", 10.0), ("/odom", 50.0), ("/imu", 100.0)):
             rate = self._hz(topic)
             ok = abs(rate - expected) <= RATE_TOLERANCE * expected
-            self.add(f"{topic} rate", ok, f"{rate:.1f} Hz",
+            detail = f"{rate:.1f} Hz"
+            if not ok:
+                # A rate that is an exact multiple of the expected one almost
+                # always means more than one publisher, so say so rather than
+                # leaving the reader to guess.
+                publishers = self._publisher_count(topic)
+                detail += f", {publishers} publisher(s)"
+                if publishers > 1:
+                    detail += " - the topic is being published more than once"
+            self.add(f"{topic} rate", ok, detail,
                      f"{expected:.0f} Hz +/- {RATE_TOLERANCE*100:.0f}%")
+
+    def _publisher_count(self, topic: str) -> int:
+        out = self._run(["ros2", "topic", "info", topic], timeout=10)[1]
+        for line in out.splitlines():
+            if "Publisher count" in line:
+                try:
+                    return int(line.split(":")[1])
+                except (IndexError, ValueError):
+                    return -1
+        return -1
+
+    @staticmethod
+    def _first_int(text: str):
+        """Extract the first bare integer from echo output.
+
+        ros2 topic echo interleaves "A message was lost!!!" warnings with the
+        value on busy topics, so parsing the whole blob fails and reports the
+        warning text as if it were the measurement.
+        """
+        for line in text.splitlines():
+            token = line.strip().rstrip("-")
+            if token.lstrip("-").isdigit():
+                return int(token)
+        return None
 
     def check_clock(self):
         """A simulated system must run on simulation time, not the wall clock."""
-        first = self._echo_once("/clock", "clock.sec")
+        first = self._first_int(self._echo_once("/clock", "clock.sec"))
         time.sleep(2.0)
-        second = self._echo_once("/clock", "clock.sec")
-        try:
-            advanced = int(second) > int(first)
-            small = int(second) < 1_000_000        # not a Unix timestamp
-        except ValueError:
+        second = self._first_int(self._echo_once("/clock", "clock.sec"))
+        if first is None or second is None:
             advanced = small = False
+            second = "unparseable"
+        else:
+            advanced = second > first
+            small = second < 1_000_000            # not a Unix timestamp
         self.add("/clock advances", advanced, f"{first} then {second}")
         self.add("/clock is simulation time, not wall clock", small,
                  f"{second}", "a small number of seconds since start")
