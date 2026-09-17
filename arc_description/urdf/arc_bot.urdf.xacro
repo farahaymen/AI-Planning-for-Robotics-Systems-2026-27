@@ -111,15 +111,24 @@
   <!-- Sensor frames. The laser frame_id must match the frame_id published in the
        LaserScan message or the costmap will silently receive nothing usable. -->
   <link name="laser_link">
-    <visual><geometry><cylinder radius="0.035" length="0.04"/></geometry></visual>
-    <!-- NO collision element, deliberately. The LiDAR sensor origin sits at the
-         centre of this link, so a collision cylinder here is geometry the sensor
-         is standing inside: every ray hits it immediately and the whole scan
-         returns the configured minimum range, 0.12 m, in all 360 directions.
-         In RViz that appears as a tight red ring locked around the robot no
-         matter where it drives.
-         A sensor mount needs a visual so you can see it and an inertial so the
-         solver is happy. It does not need collision. -->
+    <!-- The visual is offset DOWNWARD so the sensor origin sits above it.
+         gpu_lidar raycasts against the RENDERED scene, which is built from
+         visual geometry rather than collision geometry. A visual centred on the
+         link origin therefore surrounds the sensor, and every one of the 360
+         beams returns the configured minimum range of 0.12 m. The scan is full
+         of plausible numbers at a perfect 10 Hz and the robot is blind; in RViz
+         it shows as a tight red ring that never changes as the robot drives.
+         Removing the COLLISION does not help, which is the trap: collision is
+         what a CPU raycast sensor would use.
+         Housing spans 0.175 to 0.205 m above ground, beam plane at 0.230 m,
+         so there is 0.025 m of clearance. -->
+    <visual>
+      <origin xyz="0 0 -0.04"/>
+      <geometry><cylinder radius="0.035" length="0.03"/></geometry>
+      <material name="arc_black"><color rgba="0.1 0.1 0.1 1"/></material>
+    </visual>
+    <!-- No collision element: see the note above. A sensor mount needs neither
+         collision nor a visual at the beam origin. -->
     <inertial>
       <mass value="0.15"/>
       <inertia ixx="1e-4" iyy="1e-4" izz="1e-4" ixy="0" ixz="0" iyz="0"/>
