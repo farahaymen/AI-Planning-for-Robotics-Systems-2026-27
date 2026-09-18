@@ -21,9 +21,15 @@
 set -uo pipefail
 
 # ----- configuration --------------------------------------------------------
-REPO="${ARC_REPO:-https://github.com/farahaymen/AI-Planning-for-Robotics-Systems-2026-27.git}"
 WS="$HOME/arc_ws"
 SRC="$WS/src/arc-course"
+# Remembered from the last successful run, so the URL is typed once and never
+# again. Without this, deleting the workspace sends you back to hunting for the
+# clone URL, which is a poor thing to be doing at the start of a lab session.
+URL_FILE="$WS/.arc/repo-url"
+REPO="${ARC_REPO:-}"
+if [[ -z "$REPO" && -f "$URL_FILE" ]]; then REPO="$(<"$URL_FILE")"; fi
+if [[ -z "$REPO" ]]; then REPO="https://github.com/YOUR-ORG/arc-course.git"; fi
 
 CLEAN=0
 RUN_TESTS=1
@@ -73,11 +79,17 @@ if [[ -d "$SRC/.git" ]]; then
   git -C "$SRC" pull --ff-only || die "pull failed. Commit or stash local changes first."
 else
   say "cloning the repository"
-  [[ "$REPO" == *YOUR-ORG* ]] && die "set your repository URL: arc-setup --repo https://github.com/farahaymen/AI-Planning-for-Robotics-Systems-2026-27.git"
+  [[ "$REPO" == *YOUR-ORG* ]] && die "set your repository URL: arc-setup --repo https://github.com/you/arc-course.git"
   mkdir -p "$WS/src"
   git clone "$REPO" "$SRC" || die "clone failed. Is the repository public, or do you need a token?"
 fi
 note "$(git -C "$SRC" log --oneline -1)"
+
+# Remember where this came from, so a future run needs no --repo. Taken from
+# the clone itself rather than from $REPO, so it stays right if the remote is
+# later changed with `git remote set-url`.
+mkdir -p "$(dirname "$URL_FILE")"
+git -C "$SRC" remote get-url origin > "$URL_FILE" 2>/dev/null || true
 
 # ----- 3. repair executable bits -------------------------------------------
 # Git stores the executable bit as file mode. A script authored on Windows is
