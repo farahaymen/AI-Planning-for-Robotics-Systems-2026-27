@@ -7,7 +7,11 @@
 #     arc-setup                 clone or pull, build, install, test
 #     arc-setup --clean         wipe build/install/log first (use when builds act strange)
 #     arc-setup --no-test       build only, skip the verification
-#     arc-setup --repo URL      clone from somewhere other than the default
+#     arc-setup --repo URL      clone from a fork instead of the course repository
+#
+# The course repository is the default, so `arc-setup` on its own is enough.
+# After the first run the URL is remembered in ~/arc_ws/.arc/repo-url, so a
+# student working from a fork sets it once and never again.
 #
 # Steps it performs, in order:
 #   1. clone or pull the repository
@@ -27,9 +31,14 @@ SRC="$WS/src/arc-course"
 # again. Without this, deleting the workspace sends you back to hunting for the
 # clone URL, which is a poor thing to be doing at the start of a lab session.
 URL_FILE="$WS/.arc/repo-url"
+DEFAULT_REPO="https://github.com/farahaymen/AI-Planning-for-Robotics-Systems-2026-27.git"
+
+# Precedence, highest first: an explicit --repo on the command line, the
+# ARC_REPO environment variable, the URL remembered from the last run, then the
+# course default. A student cloning a fork only has to set ARC_REPO once.
 REPO="${ARC_REPO:-}"
 if [[ -z "$REPO" && -f "$URL_FILE" ]]; then REPO="$(<"$URL_FILE")"; fi
-if [[ -z "$REPO" ]]; then REPO="https://github.com/YOUR-ORG/arc-course.git"; fi
+if [[ -z "$REPO" ]]; then REPO="$DEFAULT_REPO"; fi
 
 CLEAN=0
 RUN_TESTS=1
@@ -79,7 +88,7 @@ if [[ -d "$SRC/.git" ]]; then
   git -C "$SRC" pull --ff-only || die "pull failed. Commit or stash local changes first."
 else
   say "cloning the repository"
-  [[ "$REPO" == *YOUR-ORG* ]] && die "set your repository URL: arc-setup --repo https://github.com/you/arc-course.git"
+  note "from $REPO"
   mkdir -p "$WS/src"
   git clone "$REPO" "$SRC" || die "clone failed. Is the repository public, or do you need a token?"
 fi
