@@ -73,7 +73,7 @@ if [[ -d "$SRC/.git" ]]; then
   git -C "$SRC" pull --ff-only || die "pull failed. Commit or stash local changes first."
 else
   say "cloning the repository"
-  [[ "$REPO" == *YOUR-ORG* ]] && die "set your repository URL: arc-setup --repo https://github.com/you/arc-course.git"
+  [[ "$REPO" == *YOUR-ORG* ]] && die "set your repository URL: arc-setup --repo https://github.com/farahaymen/AI-Planning-for-Robotics-Systems-2026-27.git"
   mkdir -p "$WS/src"
   git clone "$REPO" "$SRC" || die "clone failed. Is the repository public, or do you need a token?"
 fi
