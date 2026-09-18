@@ -21,7 +21,7 @@
 set -uo pipefail
 
 # ----- configuration --------------------------------------------------------
-REPO="${ARC_REPO:-https://github.com/YOUR-ORG/arc-course.git}"
+REPO="${ARC_REPO:-https://github.com/farahaymen/AI-Planning-for-Robotics-Systems-2026-27.git}"
 WS="$HOME/arc_ws"
 SRC="$WS/src/arc-course"
 
