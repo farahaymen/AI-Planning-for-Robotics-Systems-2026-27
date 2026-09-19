@@ -12,15 +12,18 @@ This folder spans Labs 3 to 5 and it is what Project 1 is built from.
 | `gridmap.py` | 4 | the six maps, and the helpers that measure a path |
 | `planners_skeleton.py` | 4 | **you edit.** BFS, DFS, Dijkstra, A*, nine TODOs |
 | `control_skeleton.py` | 4 | **you edit.** PID and Pure Pursuit, eleven TODOs |
+| `reactive_skeleton.py` | 3, 4 | **you edit.** Emergency braking and follow the gap, thirteen TODOs |
+| `sensing.py` | 3 | a LiDAR simulated on a grid map |
 | `planners.py`, `control.py` | | reference implementations to compare against |
-| `tests/` | | 126 tests, and the specification |
+| `tests/` | | 152 tests, and the specification |
 | `compare.py` | | every planner on every map |
 | `figures.py`, `figures_control.py` | | regenerate every figure in the manuals |
 
 Run the tests against your own work:
 
     ARC_PLANNERS=planners_skeleton python3 -m pytest tests/test_planners.py -x -q
-    ARC_CONTROL=control_skeleton  python3 -m pytest tests/test_control.py  -x -q
+    ARC_CONTROL=control_skeleton   python3 -m pytest tests/test_control.py  -x -q
+    ARC_REACTIVE=reactive_skeleton python3 -m pytest tests/test_reactive.py -x -q
 
 ## The controllers
 
@@ -128,3 +131,37 @@ the goal, and a cost term for driving close to walls. Nothing in it will be new.
 The point of writing these four by hand is that when the planner in Week 6
 behaves strangely, you will be debugging a thing you have built rather than a
 black box you have configured.
+
+
+## The reactive behaviours
+
+Reactive means no map, no plan, no memory: scan in, velocity out, every cycle.
+That sounds primitive and it is the most important layer in the robot, because
+it is the only part that still works when everything above it is wrong.
+
+**Emergency braking** must be a TIME, not a distance. "Brake below 0.40 m"
+leaves the same clearance at every speed, because it is not looking at speed at
+all: too cautious to creep through a doorway, too late at 0.5 m/s. The time rule
+scales by itself. Measured clearance when stopped:
+
+    speed     time rule    distance rule
+    0.10 m/s     0.10 m        0.15 m
+    0.30 m/s     0.35 m        0.15 m
+    0.50 m/s     0.56 m        0.13 m
+
+It is also shaped as a wrapper: it takes a controller and returns a controller,
+so it sits between the navigation stack and the wheels, can only ever veto, and
+can never command motion. That is what makes it a safety layer rather than
+another behaviour. Nav2's Collision Monitor, configured in Lab 7, is the same
+idea with more knobs.
+
+**Follow the gap** navigates a cluttered room for sixty seconds without touching
+anything, using no map at all. Two details are load bearing. The safety bubble
+around the nearest obstacle is how the robot's WIDTH gets represented in a
+signal that has no notion of it; without it the robot steers confidently into
+gaps it does not fit through. And the bubble must WRAP, because beam 359 is
+adjacent to beam 0 and slicing instead of wrapping silently halves it whenever
+the nearest obstacle is behind.
+
+It is also the classical baseline that Lab 9 measures the reinforcement learning
+policies against, so that comparison is now against something you wrote.
