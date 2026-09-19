@@ -1,0 +1,531 @@
+#!/usr/bin/env python3
+"""
+arc-map-view - watch a SLAM map build, without OpenGL.
+
+RViz draws its Map display through Ogre, and Ogre needs a GPU shader path that
+the Golden VM does not have. Under llvmpipe the Map display fails to link its
+shader and shows grey static, which leaves you driving blind: the map is being
+built correctly, you simply cannot see it happening.
+
+This tool subscribes to the same topic RViz does and draws it with matplotlib,
+which is a software rasteriser and has no opinion about your graphics driver.
+It works on every machine the course supports, including a headless one.
+
+    arc-map-view                                  live window
+    arc-map-view --every 20                       live window, snapshot every 20 s
+    arc-map-view --headless --every 20 --for 300  no window, 5 minutes of snapshots
+
+While the window has focus:
+
+    s     save a snapshot now
+    c     clear the driven trail
+    q     quit (and write the contact sheet and the animation)
+
+Snapshots are written to ~/arc_ws/maps as a numbered set:
+
+    warehouse_000.pgm   the occupancy grid, exactly the format map_saver writes
+    warehouse_000.yaml  the metadata Nav2 needs to load it
+    warehouse_000.png   a labelled picture of the same moment
+
+and on exit, from all the snapshots taken:
+
+    warehouse_sheet.png a contact sheet, every snapshot side by side
+    warehouse_build.gif the map assembling itself
+
+The .pgm and .yaml pair is the real deliverable. It is what you hand to Nav2 in
+Lab 6 and what Project 1 localises against. The .png and the animation are for
+the report, and for seeing the loop closure snap the map straight, which is the
+single most instructive second in Lab 5 and is over before you can point at it.
+"""
+
+from __future__ import annotations
+
+import argparse
+import math
+import os
+import sys
+import threading
+import time
+from pathlib import Path
+
+import numpy as np
+
+# ---------------------------------------------------------------------------
+# The occupancy grid, and what the numbers in it mean
+# ---------------------------------------------------------------------------
+#
+# nav_msgs/OccupancyGrid carries one signed byte per cell:
+#
+#     -1        unknown. No beam has ever passed through this cell or landed
+#               in it. This is not "empty", it is "no information", and the
+#               difference is the whole of frontier exploration in Lab 7.
+#      0..100   the probability, as a percentage, that the cell is occupied.
+#               SLAM Toolbox publishes mostly 0 and 100 with a thin band of
+#               intermediate values along surfaces it has seen from few angles.
+#
+# Row 0 of the array is the row at the map ORIGIN, which is the bottom of the
+# picture. Images are stored top row first. Every off-by-one flip you will ever
+# see in a map viewer comes from that one disagreement.
+
+UNKNOWN = -1
+
+# map_saver's thresholds and its three output greys. Matching them exactly is
+# what makes the files this tool writes interchangeable with map_saver's.
+FREE_THRESH = 0.25
+OCCUPIED_THRESH = 0.65
+PGM_FREE = 254
+PGM_UNKNOWN = 205
+PGM_OCCUPIED = 0
+
+
+def pgm_bytes(grid: np.ndarray) -> np.ndarray:
+    """Convert an occupancy grid to the three greys map_saver uses.
+
+    Trinary mode: anything above the occupied threshold is black, anything
+    below the free threshold is white, and everything else, including every
+    unknown cell, is the mid grey. A map that is entirely mid grey is not a
+    broken map, it is a robot that has not been anywhere.
+    """
+    out = np.full(grid.shape, PGM_UNKNOWN, dtype=np.uint8)
+    known = grid != UNKNOWN
+    out[known & (grid <= FREE_THRESH * 100)] = PGM_FREE
+    out[known & (grid >= OCCUPIED_THRESH * 100)] = PGM_OCCUPIED
+    return out
+
+
+def write_pgm(path: Path, grid: np.ndarray, resolution: float) -> None:
+    """Write a binary PGM. Rows top first, which reverses the grid.
+
+    The comment line is the one map_saver writes, kept identical so that the
+    two tools produce byte-comparable files and nobody has to wonder whether
+    this one is a lesser format.
+    """
+    img = pgm_bytes(grid)[::-1, :]
+    h, w = img.shape
+    with open(path, "wb") as f:
+        f.write(b"P5\n")
+        f.write(b"# CREATOR: arc-map-view %.3f m/pix\n" % resolution)
+        f.write(b"%d %d\n255\n" % (w, h))
+        f.write(img.tobytes())
+
+
+def write_yaml(path: Path, pgm_name: str, resolution: float,
+               origin: tuple[float, float, float]) -> None:
+    """Write the metadata Nav2's map server reads alongside the image."""
+    path.write_text(
+        f"image: {pgm_name}\n"
+        f"mode: trinary\n"
+        f"resolution: {resolution:.6f}\n"
+        f"origin: [{origin[0]:.6f}, {origin[1]:.6f}, {origin[2]:.6f}]\n"
+        f"negate: 0\n"
+        f"occupied_thresh: {OCCUPIED_THRESH}\n"
+        f"free_thresh: {FREE_THRESH}\n"
+    )
+
+
+# ---------------------------------------------------------------------------
+# The ROS side
+# ---------------------------------------------------------------------------
+
+class MapWatcher:
+    """Holds the latest map and the robot's path through it.
+
+    Everything here is touched from two threads: the ROS executor writes, the
+    drawing loop reads. Python's GIL makes a whole-object swap atomic, so the
+    callback builds a new array and rebinds the attribute rather than editing
+    the old one in place. Never mutate a shared array field by field and hope.
+    """
+
+    def __init__(self, node, base_frame: str, map_frame: str):
+        import tf2_ros
+        from nav_msgs.msg import OccupancyGrid
+        from rclpy.qos import (DurabilityPolicy, HistoryPolicy, QoSProfile,
+                               ReliabilityPolicy)
+
+        self.node = node
+        self.base_frame = base_frame
+        self.map_frame = map_frame
+
+        self.grid: np.ndarray | None = None
+        self.info = None
+        self.stamp = 0.0
+        self.trail: list[tuple[float, float]] = []
+        self.pose: tuple[float, float, float] | None = None
+
+        # SLAM Toolbox publishes /map LATCHED: transient local durability, depth
+        # 1. A subscriber with the default volatile QoS will connect, report no
+        # errors, and receive nothing until the next update, which on a
+        # stationary robot is never. This QoS mismatch is the most common reason
+        # a map topic looks dead when it is not.
+        qos = QoSProfile(
+            depth=1,
+            history=HistoryPolicy.KEEP_LAST,
+            reliability=ReliabilityPolicy.RELIABLE,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+        )
+        node.create_subscription(OccupancyGrid, "/map", self._on_map, qos)
+
+        self.tf_buffer = tf2_ros.Buffer()
+        self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, node)
+        node.create_timer(0.1, self._on_tf)
+
+    def _on_map(self, msg) -> None:
+        grid = np.asarray(msg.data, dtype=np.int8).reshape(
+            msg.info.height, msg.info.width)
+        self.grid = grid
+        self.info = msg.info
+        self.stamp = time.time()
+
+    def _on_tf(self) -> None:
+        """Where is the robot, in map coordinates.
+
+        map -> base_link is not one transform, it is the chain
+        map -> odom -> base_link. SLAM publishes the first, wheel odometry the
+        second, and tf2 composes them. When a loop closure fires it is the
+        map -> odom part that jumps, which is why the robot appears to teleport
+        slightly and the map does not smear.
+        """
+        import rclpy
+        from tf2_ros import (ConnectivityException, ExtrapolationException,
+                             LookupException)
+        try:
+            t = self.tf_buffer.lookup_transform(
+                self.map_frame, self.base_frame, rclpy.time.Time())
+        except (LookupException, ConnectivityException, ExtrapolationException):
+            return
+        x = t.transform.translation.x
+        y = t.transform.translation.y
+        q = t.transform.rotation
+        yaw = math.atan2(2.0 * (q.w * q.z + q.x * q.y),
+                         1.0 - 2.0 * (q.y * q.y + q.z * q.z))
+        self.pose = (x, y, yaw)
+        if not self.trail or math.hypot(x - self.trail[-1][0],
+                                        y - self.trail[-1][1]) > 0.02:
+            self.trail.append((x, y))
+
+    # -- derived numbers, the ones worth putting on screen -------------------
+
+    def stats(self) -> dict:
+        if self.grid is None or self.info is None:
+            return {}
+        res = self.info.resolution
+        cell = res * res
+        known = self.grid != UNKNOWN
+        free = known & (self.grid <= FREE_THRESH * 100)
+        occ = known & (self.grid >= OCCUPIED_THRESH * 100)
+        return {
+            "resolution": res,
+            "width_m": self.info.width * res,
+            "height_m": self.info.height * res,
+            "free_m2": float(free.sum()) * cell,
+            "wall_m2": float(occ.sum()) * cell,
+            "known_frac": float(known.sum()) / known.size,
+            "driven_m": sum(math.hypot(b[0] - a[0], b[1] - a[1])
+                            for a, b in zip(self.trail, self.trail[1:])),
+        }
+
+    def extent(self) -> tuple[float, float, float, float]:
+        o = self.info.origin.position
+        res = self.info.resolution
+        return (o.x, o.x + self.info.width * res,
+                o.y, o.y + self.info.height * res)
+
+
+# ---------------------------------------------------------------------------
+# The drawing side
+# ---------------------------------------------------------------------------
+
+C_UNKNOWN = "#b9bec6"
+C_FREE = "#ffffff"
+C_WALL = "#23262b"
+C_TRAIL = "#d1495b"
+C_ROBOT = "#2a9d8f"
+
+
+def make_figure():
+    import matplotlib.pyplot as plt
+    from matplotlib.colors import ListedColormap
+
+    fig, ax = plt.subplots(figsize=(8.2, 7.2))
+    if fig.canvas.manager is not None:          # None under the Agg backend
+        try:
+            fig.canvas.manager.set_window_title("arc-map-view")
+        except AttributeError:
+            pass
+    cmap = ListedColormap([C_WALL, C_UNKNOWN, C_FREE])
+    ax.set_xlabel("x (m)", fontsize=9)
+    ax.set_ylabel("y (m)", fontsize=9)
+    ax.set_aspect("equal")
+    ax.tick_params(labelsize=8)
+    ax.grid(alpha=0.15)
+    return fig, ax, cmap
+
+
+def render(ax, cmap, watcher: MapWatcher, bounds: list[float] | None) -> list[float]:
+    """Draw one frame. Returns the running union of every extent seen."""
+    ax.clear()
+    ax.set_aspect("equal")
+    ax.set_xlabel("x (m)", fontsize=9)
+    ax.set_ylabel("y (m)", fontsize=9)
+    ax.tick_params(labelsize=8)
+    ax.grid(alpha=0.15, zorder=0)
+
+    if watcher.grid is None:
+        ax.text(0.5, 0.5, "waiting for /map\n\n"
+                          "is slam.launch.py running?",
+                ha="center", va="center", fontsize=12, color="#666",
+                transform=ax.transAxes)
+        return bounds or [0, 1, 0, 1]
+
+    grid = watcher.grid
+    canvas = np.ones(grid.shape, dtype=int)            # unknown
+    known = grid != UNKNOWN
+    canvas[known & (grid <= FREE_THRESH * 100)] = 2    # free
+    canvas[known & (grid >= OCCUPIED_THRESH * 100)] = 0  # wall
+
+    e = watcher.extent()
+    ax.imshow(canvas, cmap=cmap, origin="lower", extent=e,
+              interpolation="nearest", vmin=0, vmax=2, zorder=1)
+
+    if len(watcher.trail) > 1:
+        xs = [p[0] for p in watcher.trail]
+        ys = [p[1] for p in watcher.trail]
+        ax.plot(xs, ys, color=C_TRAIL, linewidth=1.3, alpha=0.95, zorder=3,
+                label="driven")
+
+    if watcher.pose is not None:
+        x, y, yaw = watcher.pose
+        ax.plot(x, y, "o", color=C_ROBOT, markersize=10,
+                markeredgecolor="white", markeredgewidth=1.4, zorder=4)
+        ax.arrow(x, y, 0.45 * math.cos(yaw), 0.45 * math.sin(yaw),
+                 head_width=0.16, head_length=0.16, fc=C_ROBOT, ec=C_ROBOT,
+                 zorder=4, length_includes_head=True)
+
+    # The window only ever grows, so an early frame and a late one can be laid
+    # side by side and compared honestly.
+    if bounds is None:
+        bounds = list(e)
+    else:
+        bounds = [min(bounds[0], e[0]), max(bounds[1], e[1]),
+                  min(bounds[2], e[2]), max(bounds[3], e[3])]
+    pad = 0.3
+    ax.set_xlim(bounds[0] - pad, bounds[1] + pad)
+    ax.set_ylim(bounds[2] - pad, bounds[3] + pad)
+
+    s = watcher.stats()
+    ax.set_title(
+        f"mapped {s['free_m2']:.1f} m² of floor and {s['wall_m2']:.1f} m² of wall"
+        f"   ·   driven {s['driven_m']:.1f} m\n"
+        f"grid {s['width_m']:.1f} × {s['height_m']:.1f} m at "
+        f"{s['resolution']*100:.0f} cm per cell   ·   "
+        f"{s['known_frac']*100:.0f}% of the grid explored",
+        fontsize=9.5)
+    return bounds
+
+
+def save_snapshot(watcher: MapWatcher, fig, out_dir: Path, name: str,
+                  index: int) -> Path:
+    """Write the .pgm, the .yaml and the .png for one moment."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    stem = f"{name}_{index:03d}"
+    o = watcher.info.origin
+    yaw = 2.0 * math.atan2(o.orientation.z, o.orientation.w)
+
+    write_pgm(out_dir / f"{stem}.pgm", watcher.grid, watcher.info.resolution)
+    write_yaml(out_dir / f"{stem}.yaml", f"{stem}.pgm",
+               watcher.info.resolution,
+               (o.position.x, o.position.y, yaw))
+    png = out_dir / f"{stem}.png"
+    fig.savefig(png, dpi=110)
+    return png
+
+
+# ---------------------------------------------------------------------------
+# What the snapshots become
+# ---------------------------------------------------------------------------
+
+def contact_sheet(frames: list[Path], out: Path, columns: int = 4) -> Path | None:
+    """Every snapshot side by side, in order.
+
+    This is the figure to put in the report. A map does not improve smoothly:
+    it accretes, and then at a loop closure it SNAPS, and two frames either side
+    of that moment say more than any amount of prose about why SLAM is a
+    graph optimisation and not a drawing program.
+    """
+    try:
+        from PIL import Image
+    except ImportError:
+        return None
+    if not frames:
+        return None
+
+    images = [Image.open(p).convert("RGB") for p in frames]
+    w, h = images[0].size
+    scale = 520 / w
+    w, h = int(w * scale), int(h * scale)
+    images = [im.resize((w, h), Image.LANCZOS) for im in images]
+
+    cols = min(columns, len(images))
+    rows = (len(images) + cols - 1) // cols
+    sheet = Image.new("RGB", (cols * w, rows * h), "white")
+    for i, im in enumerate(images):
+        sheet.paste(im, ((i % cols) * w, (i // cols) * h))
+    sheet.save(out)
+    return out
+
+
+def animation(frames: list[Path], out: Path, ms: int = 700) -> Path | None:
+    """The same snapshots as an animated GIF."""
+    try:
+        from PIL import Image
+    except ImportError:
+        return None
+    if len(frames) < 2:
+        return None
+    images = [Image.open(p).convert("P", palette=Image.ADAPTIVE) for p in frames]
+    w, h = images[0].size
+    scale = 720 / w
+    images = [im.resize((int(w * scale), int(h * scale))) for im in images]
+    images[0].save(out, save_all=True, append_images=images[1:],
+                   duration=ms, loop=0)
+    return out
+
+
+# ---------------------------------------------------------------------------
+
+def main(argv=None) -> int:
+    p = argparse.ArgumentParser(
+        description="Watch a SLAM map build, without OpenGL.",
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--name", default="warehouse",
+                   help="base name for the saved files (default: warehouse)")
+    p.add_argument("--out", default=str(Path.home() / "arc_ws" / "maps"),
+                   help="where to write them (default: ~/arc_ws/maps)")
+    p.add_argument("--every", type=float, default=0.0, metavar="SECONDS",
+                   help="save a snapshot this often; 0 means only on 's'")
+    p.add_argument("--for", dest="duration", type=float, default=0.0,
+                   metavar="SECONDS", help="stop after this long; 0 means never")
+    p.add_argument("--headless", action="store_true",
+                   help="no window, snapshots only. Implies --every 30 if unset.")
+    p.add_argument("--base-frame", default="base_link")
+    p.add_argument("--map-frame", default="map")
+    args = p.parse_args(argv)
+
+    headless = args.headless or not os.environ.get("DISPLAY")
+    if headless and args.every <= 0:
+        args.every = 30.0
+
+    import matplotlib
+    if headless:
+        matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    if not headless and matplotlib.get_backend().lower() == "agg":
+        print("matplotlib has no interactive backend, so there will be no "
+              "window.\nInstall one with:  sudo apt install -y python3-tk\n"
+              "Continuing with snapshots only.", file=sys.stderr)
+        headless = True
+        if args.every <= 0:
+            args.every = 30.0
+
+    import rclpy
+    rclpy.init()
+    node = rclpy.create_node("arc_map_view")
+    watcher = MapWatcher(node, args.base_frame, args.map_frame)
+
+    executor = threading.Thread(target=rclpy.spin, args=(node,), daemon=True)
+    executor.start()
+
+    out_dir = Path(args.out).expanduser()
+    fig, ax, cmap = make_figure()
+    frames: list[Path] = []
+    bounds = None
+    state = {"running": True, "index": 0, "last_save": 0.0, "clear": False,
+             "save_now": False}
+
+    def on_key(event):
+        if event.key == "s":
+            state["save_now"] = True
+        elif event.key == "c":
+            state["clear"] = True
+        elif event.key in ("q", "escape"):
+            state["running"] = False
+
+    def on_close(event):
+        state["running"] = False
+
+    if not headless:
+        fig.canvas.mpl_connect("key_press_event", on_key)
+        fig.canvas.mpl_connect("close_event", on_close)
+        plt.ion()
+        plt.show(block=False)
+
+    print(f"watching /map   ·   writing to {out_dir}")
+    if args.every > 0:
+        print(f"snapshot every {args.every:.0f} s"
+              + (f", stopping after {args.duration:.0f} s" if args.duration else ""))
+    if not headless:
+        print("keys: s save now   c clear the trail   q quit")
+
+    started = time.time()
+    try:
+        while state["running"]:
+            if state["clear"]:
+                watcher.trail.clear()
+                state["clear"] = False
+
+            bounds = render(ax, cmap, watcher, bounds)
+
+            if not headless:
+                fig.canvas.draw_idle()
+                plt.pause(0.25)
+            else:
+                time.sleep(0.25)
+
+            now = time.time()
+            due = args.every > 0 and (now - state["last_save"]) >= args.every
+            if watcher.grid is not None and (due or state["save_now"]):
+                png = save_snapshot(watcher, fig, out_dir, args.name,
+                                    state["index"])
+                frames.append(png)
+                s = watcher.stats()
+                print(f"  [{state['index']:03d}] {png.name}   "
+                      f"floor {s['free_m2']:6.1f} m²   "
+                      f"driven {s['driven_m']:6.1f} m")
+                state["index"] += 1
+                state["last_save"] = now
+                state["save_now"] = False
+
+            if args.duration and (now - started) >= args.duration:
+                break
+    except KeyboardInterrupt:
+        print()
+    finally:
+        # Always leave a final snapshot behind, even on Ctrl-C. A run that
+        # produces nothing because it was stopped the usual way is a tool that
+        # nobody will trust twice.
+        if watcher.grid is not None:
+            png = save_snapshot(watcher, fig, out_dir, args.name, state["index"])
+            frames.append(png)
+            s = watcher.stats()
+            print(f"\nfinal map: {s['free_m2']:.1f} m² of floor, "
+                  f"{s['wall_m2']:.1f} m² of wall, driven {s['driven_m']:.1f} m")
+            print(f"  {out_dir / (args.name + '_%03d.pgm' % state['index'])}")
+            print(f"  {out_dir / (args.name + '_%03d.yaml' % state['index'])}")
+
+        sheet = contact_sheet(frames, out_dir / f"{args.name}_sheet.png")
+        if sheet:
+            print(f"  {sheet}   ({len(frames)} snapshots)")
+        gif = animation(frames, out_dir / f"{args.name}_build.gif")
+        if gif:
+            print(f"  {gif}")
+
+        node.destroy_node()
+        rclpy.shutdown()
+        plt.close("all")
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

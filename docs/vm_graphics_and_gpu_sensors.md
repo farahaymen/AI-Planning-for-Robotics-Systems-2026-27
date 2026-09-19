@@ -115,3 +115,52 @@ impossible:
 
 The graphics checks run before the simulation starts, so when the LiDAR check
 fails the explanation is already on screen.
+
+## The second casualty: RViz's Map display
+
+Software rendering fixed the sensors. It did not fix every consumer of a GPU,
+and one of them matters to Lab 5.
+
+With SLAM running, RViz logs:
+
+```
+[ERROR] GLSL link result: active samplers with a different type refer to the
+        same texture image unit
+```
+
+and the Map display shows grey static rather than the occupancy grid.
+
+This is not a SLAM failure and not a topic problem. RViz draws the Map display
+through Ogre with a shader that binds two samplers of different types to one
+texture unit. Hardware drivers tolerate that; Mesa's GLSL compiler, which is
+what llvmpipe uses, rejects the link and the display falls back to an
+uninitialised texture. The map on `/map` is correct throughout. Only the
+picture of it is wrong.
+
+Confirm it rather than believing it. With the map still running:
+
+```bash
+ros2 topic echo /map --field info --once
+```
+
+A plausible `width`, `height` and `resolution` means SLAM is working and the
+fault is entirely in the drawing.
+
+Two things reduce the damage:
+
+- **Map display, Color Scheme: `raw`.** The `map` scheme is the one that needs
+  the second sampler. `raw` sometimes links where `map` does not, and costs
+  nothing to try.
+- **`arc-map-view`.** Draws `/map` with matplotlib, which is a software
+  rasteriser with no OpenGL path at all, so it cannot fail this way on any
+  machine. It also writes the `.pgm` and `.yaml` pair that Nav2 loads, a
+  contact sheet, and an animation of the map assembling itself.
+
+The rest of RViz is unaffected: the laser scan, the TF tree, the robot model
+and the path displays all render normally. It is specifically the Map display.
+
+For teaching, `arc-map-view` is the better tool regardless of the bug. Watching
+the floor area climb while you drive tells a student when a room is finished;
+a picture of a map does not. And the loop closure, which is the moment Lab 5
+exists to show, is over in one frame. Two contact sheet tiles either side of it
+make the point permanently, where a live window makes it once.

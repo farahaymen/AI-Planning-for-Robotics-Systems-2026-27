@@ -19,7 +19,8 @@
 #   3. create the course working directories
 #   4. resolve dependencies with rosdep
 #   5. colcon build
-#   6. install course-check, course-smoke-test and arc-clean system wide
+#   6. install course-check, course-smoke-test, arc-clean and arc-map-view
+#      system wide
 #   7. run the offline test suite
 #   8. run course-check and course-smoke-test
 set -uo pipefail
@@ -156,7 +157,7 @@ note "$(ls "$WS/install" | grep -c '^arc_') arc packages installed"
 
 # ----- 7. install the course commands --------------------------------------
 say "installing course commands"
-for tool in course-check course-smoke-test arc-clean arc-setup; do
+for tool in course-check course-smoke-test arc-clean arc-setup arc-map-view; do
   if [[ -f "$SRC/scripts/$tool" ]]; then
     sudo install -m 0755 "$SRC/scripts/$tool" "/usr/local/bin/$tool" \
       && note "$tool"
