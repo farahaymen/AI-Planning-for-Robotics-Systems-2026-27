@@ -13,9 +13,10 @@ This folder spans Labs 3 to 5 and it is what Project 1 is built from.
 | `planners_skeleton.py` | 4 | **you edit.** BFS, DFS, Dijkstra, A*, nine TODOs |
 | `control_skeleton.py` | 4 | **you edit.** PID and Pure Pursuit, eleven TODOs |
 | `reactive_skeleton.py` | 3, 4 | **you edit.** Emergency braking and follow the gap, thirteen TODOs |
+| `coverage_skeleton.py` | 4 | **you edit.** Boustrophedon coverage, eight TODOs |
 | `sensing.py` | 3 | a LiDAR simulated on a grid map |
 | `planners.py`, `control.py` | | reference implementations to compare against |
-| `tests/` | | 152 tests, and the specification |
+| `tests/` | | 168 tests, and the specification |
 | `compare.py` | | every planner on every map |
 | `figures.py`, `figures_control.py` | | regenerate every figure in the manuals |
 
@@ -24,6 +25,7 @@ Run the tests against your own work:
     ARC_PLANNERS=planners_skeleton python3 -m pytest tests/test_planners.py -x -q
     ARC_CONTROL=control_skeleton   python3 -m pytest tests/test_control.py  -x -q
     ARC_REACTIVE=reactive_skeleton python3 -m pytest tests/test_reactive.py -x -q
+    ARC_COVERAGE=coverage_skeleton python3 -m pytest tests/test_coverage.py -x -q
 
 ## The controllers
 
@@ -165,3 +167,42 @@ the nearest obstacle is behind.
 
 It is also the classical baseline that Lab 9 measures the reinforcement learning
 policies against, so that comparison is now against something you wrote.
+
+
+## Coverage planning
+
+Every other planner here answers "how do I get from A to B". This one answers
+"how do I visit all of it", which is a different problem with a different
+objective, and it is the question a large part of the robotics market actually
+asks: vacuum cleaners, lawn mowers, floor scrubbers, agricultural sprayers.
+
+**Turns are the cost, not distance.** Every turn is decelerate, rotate,
+accelerate, and on most machines disengage and re-engage the tool. So the
+headline result is about turns, not metres. On a 6 m by 4 m furnished room with
+a 0.45 m tool:
+
+    sweep along rows      covered 100.0%   40 turns   13 passes
+    sweep along columns   covered  98.1%   62 turns   20 passes
+
+Same room, same tool, same floor cleaned. Sweeping along the long axis saves 22
+turns, because turns happen at the ENDS of passes and longer passes means fewer
+ends. Nobody guesses this reliably, which is why it is worth measuring.
+
+**The spacing and the tool width are different numbers.** Conflating them is the
+mistake that makes a coverage planner look perfect at every setting: widen the
+gap between passes, widen the imaginary brush to match, and the uncovered
+stripes vanish from the measurement while remaining on the floor. Measured with
+a fixed 0.45 m tool:
+
+    spacing    covered   turns
+    0.25 m      100.0%      99      re-cleaning what the last pass did
+    0.45 m      100.0%      52      the knee
+    0.70 m       69.2%      34      stripes, and the robot has no idea
+
+**Coverage is scored against REACHABLE space.** A map with a sealed cupboard
+contains free cells no robot can enter; counting those as failures caps every
+planner below 100 percent for reasons that have nothing to do with the planner.
+
+The coverage planner calls the A* from Exercise 4.2 to join one pass to the
+next. It is a CLIENT of a point to point planner, not a replacement for one,
+and Nav2's coverage server has the same relationship to the navigation stack.
