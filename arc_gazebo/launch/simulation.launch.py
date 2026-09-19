@@ -3,6 +3,7 @@
     ros2 launch arc_gazebo simulation.launch.py
     ros2 launch arc_gazebo simulation.launch.py headless:=true     # graphics Tier B
     ros2 launch arc_gazebo simulation.launch.py world:=broken_a    # Lab 3 fault
+    ros2 launch arc_gazebo simulation.launch.py render_engine:=ogre    # diagnosis only
 
 The broken_* worlds are the standard warehouse with a deliberate SENSOR fault,
 because the faults live in the robot description rather than in the world. The
@@ -47,20 +48,57 @@ def launch_setup(context, *args, **kwargs):
         value_type=str,
     )
 
+    # THE LIDAR DEPENDS ON THE TWO LINES BELOW. Read this before changing them.
+    #
+    # A GPU LiDAR works by rendering the scene from the sensor's viewpoint and
+    # reading the depth buffer. If that render silently produces nothing, every
+    # ray reads zero distance, which the sensor clamps to its configured
+    # minimum. The scan then arrives at the correct rate, with the correct beam
+    # count, full of plausible numbers, and the robot is completely blind. No
+    # error is printed. It took a full day to find, so the measurements are
+    # recorded here rather than in anyone's memory.
+    #
+    # Measured on the reference VM, and confirmed against Gazebo's own
+    # gpu_lidar_sensor.sdf demo so that none of our code was in the picture:
+    #
+    #     engine  context  graphics   result
+    #     ogre2   EGL      SVGA3D     eglInitialize fails on /dev/dri/card0
+    #     ogre2   EGL      llvmpipe   eglInitialize fails, then segfaults
+    #     ogre2   GLX      SVGA3D     renders nothing, silently
+    #     ogre    GLX      SVGA3D     works at 160 deg, 75% dead at 360 deg
+    #     ogre2   GLX      llvmpipe   WORKS, full 360 deg, RTF about 0.92
+    #
+    # Two conclusions. First, --headless-rendering must NOT be passed: it forces
+    # the EGL path, EGL then insists on the virtual GPU at /dev/dri/card0, and
+    # cannot produce a context. `-s` alone gives a server with no GUI, which is
+    # all "headless" ever needed to mean here. Second, ogre2 is required: Ogre
+    # 1.x cannot render a single row target and stitches a full circle badly.
+    #
+    # ogre2 needs a conformant OpenGL 3.3 core context. VirtualBox's SVGA3D
+    # driver advertises 4.1 core but its implementation is incomplete, so the
+    # VM must run with 3D acceleration OFF, which falls back to llvmpipe and a
+    # complete 4.5 core profile. course-check verifies this.
+    #
+    # On a machine with a real GPU, none of this applies and ogre2 simply works.
+    engine = LaunchConfiguration("render_engine")
+
     gz_args = [PathJoinSubstitution([gz_share, "worlds", world_file])]
     gz = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(PathJoinSubstitution(
             [FindPackageShare("ros_gz_sim"), "launch", "gz_sim.launch.py"])),
         launch_arguments={
             # -s is server only, no GUI. -r starts the simulation running.
-            "gz_args": [*gz_args, " -r -s --headless-rendering"],
+            # --render-engine-server is what SENSORS obey; the GUI's engine is a
+            # separate flag and is irrelevant when there is no GUI.
+            "gz_args": [*gz_args, " -r -s --render-engine-server ", engine],
         }.items(),
         condition=IfCondition(headless),
     )
     gz_gui = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(PathJoinSubstitution(
             [FindPackageShare("ros_gz_sim"), "launch", "gz_sim.launch.py"])),
-        launch_arguments={"gz_args": [*gz_args, " -r"]}.items(),
+        launch_arguments={"gz_args": [*gz_args, " -r --render-engine-server ",
+                                      engine]}.items(),
         condition=UnlessCondition(headless),
     )
 
@@ -117,5 +155,10 @@ def generate_launch_description():
                               description="arc_warehouse, broken_a, broken_b or broken_c"),
         DeclareLaunchArgument("headless", default_value="false",
                               description="true for graphics Tier B"),
+        DeclareLaunchArgument("render_engine", default_value="ogre2",
+                              choices=["ogre", "ogre2"],
+                              description="sensor render engine. ogre2 is "
+                                          "required; ogre cannot render a "
+                                          "single-row 360 degree scan"),
         OpaqueFunction(function=launch_setup),
     ])

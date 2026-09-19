@@ -35,8 +35,20 @@ RESET = "\033[0m"
 COLOURS = {"PASS": "\033[32m", "FAIL": "\033[31m", "WARN": "\033[33m"}
 
 LAUNCH = ["ros2", "launch", "arc_gazebo", "simulation.launch.py"]
-SETTLE_S = 25.0          # Gazebo, the controllers and TF all need time
+# Gazebo, the controllers and TF all need time. Generous because a seat using
+# software rendering takes appreciably longer to reach a running state than one
+# with hardware acceleration, and a timeout that only passes on a fast machine
+# is a test that lies on a slow one.
+SETTLE_S = 40.0
+CONTROLLER_TIMEOUT_S = 90.0
+# How long to watch a topic before believing its rate. See _hz.
+HZ_MEASURE_S = 20.0
 RATE_TOLERANCE = 0.25    # fraction
+# Course constant, declared in arc_bot.gazebo.xacro. Checked rather than
+# assumed, because a scan that arrives with fewer beams than the sensor is
+# configured for is being truncated in transit and nothing measured from it
+# describes the whole sweep.
+EXPECTED_BEAMS = 360
 
 
 @dataclass
@@ -143,14 +155,14 @@ class Smoke:
                 return self.add("simulation launches", False,
                                 f"exited early, see {self.log_path}")
             if "/scan" in self._topics():
-                if self._wait_for_controllers(timeout_s=45.0):
+                if self._wait_for_controllers(timeout_s=CONTROLLER_TIMEOUT_S):
                     return self.add("simulation launches", True, "running")
                 return self.add("simulation launches", False,
                                 "controllers never became active")
             time.sleep(1.0)
         return self.add("simulation launches", False, f"no /scan after {SETTLE_S:.0f}s")
 
-    def _wait_for_controllers(self, timeout_s: float = 45.0) -> bool:
+    def _wait_for_controllers(self, timeout_s: float = CONTROLLER_TIMEOUT_S) -> bool:
         """Block until both controllers report active.
 
         Nothing downstream works before this: /odom and /cmd_vel do not exist
@@ -201,19 +213,37 @@ class Smoke:
     def _topics(self) -> list[str]:
         return self._run(["ros2", "topic", "list"], timeout=15)[1].split()
 
-    def _hz(self, topic: str, window: int = 12) -> float:
-        """Measure a publication rate. ros2 topic hz runs until interrupted."""
+    def _hz(self, topic: str, window: int = 50, settle_reports: int = 3) -> float:
+        """Measure a publication rate, after letting the average settle.
+
+        The earlier version of this took the FIRST 'average rate:' line and
+        stopped. That line is the least trustworthy one: it covers the shortest
+        window, and it lands while the smoke test is still starting processes,
+        so a busy moment is measured as a slow topic. It reported /odom at
+        33.3 Hz on a machine where a twenty second measurement gives 49.7 Hz
+        with a standard deviation under a millisecond. The topic was fine; the
+        measurement was not.
+
+        This reads several reports and returns the last one, so the figure comes
+        from a settled average over a wider window. That costs a few seconds per
+        topic and buys a number worth acting on.
+        """
         proc = subprocess.Popen(["ros2", "topic", "hz", topic, "--window", str(window)],
                                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                                 text=True, preexec_fn=os.setsid)
         rate = 0.0
-        deadline = time.time() + 12
+        seen = 0
+        deadline = time.time() + HZ_MEASURE_S
         try:
             while time.time() < deadline:
                 line = proc.stdout.readline()
+                if not line:
+                    break
                 if "average rate:" in line:
                     rate = float(line.split("average rate:")[1].strip())
-                    break
+                    seen += 1
+                    if seen >= settle_reports:
+                        break
         finally:
             try:
                 os.killpg(os.getpgid(proc.pid), signal.SIGINT)
@@ -222,8 +252,18 @@ class Smoke:
                 pass
         return rate
 
-    def _echo_once(self, topic: str, field: str = "") -> str:
+    def _echo_once(self, topic: str, field: str = "", full: bool = False) -> str:
+        """One message from a topic, optionally one field of it.
+
+        `full` matters for arrays. Without --full-length, `ros2 topic echo`
+        truncates an array after 128 elements, so a 360 beam scan arrives as
+        the first 128 beams and an ellipsis. A check that then reports a min
+        and a max is describing a third of the sensor while sounding like it
+        describes all of it.
+        """
         cmd = ["ros2", "topic", "echo", "--once", topic]
+        if full:
+            cmd += ["--full-length"]
         if field:
             cmd += ["--field", field]
         return self._run(cmd, timeout=20)[1].strip()
@@ -371,12 +411,23 @@ class Smoke:
         exist passes this. Checking the SPREAD catches it.
         """
         import re
-        out = self._echo_once("/scan", "ranges")
-        values = [float(v) for v in re.findall(r"\d+\.\d+(?:e[+-]\d+)?", out)]
+        out = self._echo_once("/scan", "ranges", full=True)
+        values = [float(v) for v in re.findall(r"\d+\.\d+(?:e[+-]?\d+)?", out)]
+        n_inf = len(re.findall(r"\binf\b", out))
         finite = [v for v in values if 0.0 < v < 1e6]
 
+        # Report the beam count. A scan that parsed 128 values when the sensor
+        # is configured for 360 means the reading is being truncated somewhere,
+        # and every conclusion drawn from it is about a partial sweep.
+        n_seen = len(values) + n_inf
+        if n_seen != EXPECTED_BEAMS:
+            self.add("/scan has every beam", False,
+                     f"parsed {n_seen} of {EXPECTED_BEAMS}",
+                     f"{EXPECTED_BEAMS} values")
+
         if not finite:
-            return self.add("/scan carries real values", False, "empty or all invalid")
+            return self.add("/scan carries real values", False,
+                            f"no finite ranges; {n_inf} beam(s) returned inf")
 
         low, high = min(finite), max(finite)
         # The reference world is 12 m across and the robot spawns 1 m from two
@@ -384,10 +435,58 @@ class Smoke:
         # that the furthest return exceeds 1 m keeps this robust to where the
         # robot happens to be while still catching a sensor inside geometry.
         ok = high > 1.0 and (high - low) > 0.5
-        detail = f"min {low:.2f} m, max {high:.2f} m"
+        detail = (f"min {low:.2f} m, max {high:.2f} m, "
+                  f"{len(finite)} finite of {n_seen} beams")
         if not ok:
-            detail += " - every beam reads the same, the LiDAR is inside geometry"
+            # Say what to do, not just that something is wrong. Every beam
+            # reading the configured minimum means the sensor's render produced
+            # nothing, and on this course that has exactly one common cause.
+            detail += (" - every beam reads range_min, so the sensor render "
+                       "produced nothing; see 'graphics' above")
         self.add("/scan sees the room", ok, detail, "a spread of ranges, max above 1 m")
+
+    def check_graphics(self):
+        """The renderer the GPU LiDAR depends on.
+
+        This is a required check because a misconfigured renderer does not
+        announce itself. The sensor still publishes at the right rate with the
+        right beam count, and every value is the configured minimum. Checking
+        the renderer turns a day of debugging into one red line.
+
+        ogre2 needs a conformant OpenGL 3.3 core context. llvmpipe provides 4.5
+        core in software and always works. A real GPU works. VirtualBox's
+        SVGA3D advertises 4.1 core but its implementation is incomplete and
+        ogre2 renders nothing on it, so a VM must run with 3D acceleration OFF.
+        """
+        code, out = self._run(["glxinfo", "-B"], timeout=15)
+        if code != 0 or not out.strip():
+            return self.add("graphics: renderer", True,
+                            "glxinfo unavailable, not checked", required=False)
+
+        renderer = core = ""
+        for line in out.splitlines():
+            if "OpenGL renderer string:" in line:
+                renderer = line.split(":", 1)[1].strip()
+            elif "OpenGL core profile version string:" in line:
+                core = line.split(":", 1)[1].strip()
+
+        broken = "svga3d" in renderer.lower()
+        detail = renderer or "unknown"
+        if broken:
+            detail += (" - incomplete core profile; ogre2 renders nothing. "
+                       "Power off the VM and untick Display > 3D acceleration")
+        self.add("graphics: renderer", not broken, detail,
+                 "llvmpipe or a real GPU, not SVGA3D")
+
+        # 3.3 is ogre2's floor. Parse the leading version number only.
+        version = 0.0
+        if core:
+            try:
+                version = float(core.split()[0])
+            except (ValueError, IndexError):
+                version = 0.0
+        self.add("graphics: OpenGL core profile", version >= 3.3,
+                 core or "not reported", "3.3 or higher")
 
     # -- reporting ----------------------------------------------------------
 
@@ -437,6 +536,10 @@ def main() -> int:
 
     smoke = Smoke(args.headless)
     try:
+        # Graphics first. It needs no simulation, and when the LiDAR check
+        # fails later this line is the explanation, so it should already be on
+        # screen rather than something the reader has to go and find.
+        smoke.check_graphics()
         if smoke.preflight() and smoke.start_simulation():
             smoke.check_topics()
             smoke.check_clock()

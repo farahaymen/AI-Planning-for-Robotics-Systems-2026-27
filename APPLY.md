@@ -1,111 +1,107 @@
-# arc-fixes, round 3
+# arc-fixes, round 4
 
-Two things in this bundle. One unblocks the simulator, one is new lab material.
+Everything needed to make the environment pass, plus the Lab 4 planning
+material. Copy the ten items **inside** the `arc` folder into the root of your
+clone, replacing when asked, then commit and push.
 
-## 1. The LiDAR fix (this is the one that matters)
+## VM setting, not in this zip
 
-`arc_description/urdf/arc_bot.urdf.xacro`
+Before anything else, with the VM powered off:
 
-Your last smoke test said:
+**Settings, Display, untick 3D acceleration.** Video memory 128 MB.
 
-```
-/scan sees the room   FAIL   min 0.12 m, max 0.12 m - every beam reads the same,
-                             the LiDAR is inside geometry
-```
+This is load bearing. VirtualBox's SVGA3D driver advertises OpenGL 4.1 core but
+its implementation is incomplete, and ogre2 silently renders nothing on it.
+With 3D acceleration off the guest falls back to llvmpipe, which gives a
+complete 4.5 core profile. Measured real time factor is about 0.92 either way,
+so it costs the simulation nothing. The desktop feels slower because GNOME is
+composited in software; the labs run headless.
 
-Every other check passed, so the robot drives, the controllers run, the clock
-advances and the TF tree resolves. It just cannot see.
+## What changed
 
-**What was wrong.** The laser link's visual cylinder was centred on the link
-origin, which is where the beams start. Gazebo's `gpu_lidar` raycasts against
-the **rendered** scene, and the rendered scene is built from **visual** geometry.
-So all 360 beams started inside the sensor's own housing and returned the
-configured minimum range, 0.12 m, forever. The scan looked healthy: 360 beams, a
-perfect 10 Hz, plausible numbers. In RViz it is a tight red ring that never
-changes as the robot drives.
+**`arc_gazebo/launch/simulation.launch.py`**
+Removed `--headless-rendering` and added a `render_engine` argument defaulting
+to `ogre2`. The flag forced the EGL path, EGL insisted on `/dev/dri/card0` and
+could not produce a context, so the LiDAR rendered nothing and every beam
+returned its configured minimum of 0.12 m at a perfect 10 Hz. The full
+measurement table is in the file's comments and in
+`docs/vm_graphics_and_gpu_sensors.md`.
 
-The trap is that removing the `<collision>` element does not fix it. Collision
-geometry is what a CPU raycast sensor uses. I got this wrong first time round and
-your `gz sdf -p` output is what proved it: the collision was gone and the scan
-still read 0.12.
+**`scripts/course-smoke-test`**
+Four fixes, each from a real failure this weekend:
 
-**The fix.** Offset the visual 0.04 m downward so the housing sits below the beam
-plane, and drop the collision element entirely, since a sensor mount needs
-neither. Housing now spans 0.175 to 0.205 m above the ground, the beam plane is
-at 0.230 m, so there is 0.025 m of clearance.
+- Rate measurement took the first `average rate:` line, which is the shortest
+  and least settled window, and it landed while the test was still starting
+  processes. It reported `/odom` at 33.3 Hz where a twenty second measurement
+  gives 49.7 Hz with a standard deviation under a millisecond. It now reads
+  several reports and returns a settled one.
+- `ros2 topic echo` truncates arrays at 128 elements by default, so the scan
+  check had only ever inspected 128 of 360 beams without saying so. It now
+  passes `--full-length` and reports the beam count.
+- Timeouts raised: 40 s to settle, 90 s for controllers. The old 45 s limit
+  failed on software rendering, which looked like a broken environment and was
+  a broken test.
+- New `graphics: renderer` and `graphics: OpenGL core profile` checks, run
+  before the simulation starts, so that when the LiDAR check fails the reason
+  is already on screen. The renderer check names the VM setting to change.
 
-After applying it, the smoke test line should read something like
-`min 0.35 m, max 9.60 m`.
+**`docs/vm_graphics_and_gpu_sensors.md`** (new)
+The whole diagnosis, the measurement table, and why software rendering is the
+right answer here rather than a compromise.
 
-### Why it did not land last time
-
-Your run was from `~/.local/share/Trash/files/arc_ws/src/arc-course`, and the
-commit was still `3fa5149`, and `arc-setup` reported `0 file(s) needed it`. Those
-three together say the file never reached the commit you pushed. Worth checking
-on the Linux side before you copy anything:
-
-```bash
-grep -c "0 0 -0.04" ~/arc_ws/src/arc-course/arc_description/urdf/arc_bot.urdf.xacro
-```
-
-`1` means it is already there and you only need `arc-setup`. `0` means copy it
-over on Windows as below. Either way, there is a second copy of the whole
-workspace sitting in your Trash; delete it, so that a future `cd` into the wrong
-one cannot cost you an evening again.
-
-## 2. Lab 4 planning materials, new
-
-`starters/lab04_planning/`
-
-Complete and tested: 93 tests passing against the reference, all four figures
-generated from the code rather than drawn. Pure Python, no ROS, so it runs
-anywhere. See `starters/lab04_planning/README.md` for what each of the six maps
-is for and why.
-
-Contents:
-
-```
-gridmap.py              six maps, chosen so the algorithms actually disagree
-planners_skeleton.py    what students get. Nine TODOs
-planners.py             reference implementation
-tests/test_planners.py  93 tests, doubling as the specification
-compare.py              the comparison table, and ASCII paths
-figures.py              regenerates the four figures
-figures/                the four figures, generated
-README.md               the exercise
-```
+**`starters/lab04_planning/`** (new)
+Lab 4 planning exercise. Pure Python, no ROS, no simulator, so it runs on any
+machine including a lab PC with nothing installed but Python and NumPy.
+93 tests passing, four figures generated from the code. See its README for what
+each of the six maps is for.
 
 ## Copying it across
 
-From the root of your Windows clone:
+Open the unzipped `arc` folder, select the ten items inside it, and copy them
+into the folder that contains your `.git`. Choose **Replace the files in the
+destination**. Copy the contents, not the `arc` folder itself.
 
-```
-xcopy /E /Y path\to\arc-fixes\arc_description arc_description\
-xcopy /E /Y path\to\arc-fixes\arc_gazebo      arc_gazebo\
-xcopy /E /Y path\to\arc-fixes\starters        starters\
-xcopy /E /Y path\to\arc-fixes\scripts         scripts\
-xcopy /E /Y path\to\arc-fixes\arc_lab1        arc_lab1\
-xcopy /E /Y path\to\arc-fixes\arc_lab3        arc_lab3\
-xcopy /E /Y path\to\arc-fixes\arc_lab4        arc_lab4\
-xcopy /E /Y path\to\arc-fixes\arc_lab5        arc_lab5\
-xcopy /E /Y path\to\arc-fixes\arc_lab7        arc_lab7\
+Then, in PowerShell from that folder:
 
-git status --short
-```
-
-**Read that `git status` before committing.** It has to list
-`arc_description/urdf/arc_bot.urdf.xacro`. If it does not, the copy did not land
-and pushing will change nothing. This is the third time a file has looked copied
-and not been in the commit, so it is worth the ten seconds.
-
-```
+```powershell
 git add -A
-git commit -m "Fix LiDAR visual occluding the beam plane; add Lab 4 planning materials"
+git commit -m "Fix LiDAR render path; add graphics checks and Lab 4 planning"
 git push
 ```
 
-Then on the VM:
+On the VM:
 
 ```bash
+cd ~
 arc-setup
 ```
+
+## One thing to verify afterwards
+
+The vertical-samples block you added to `arc_bot.gazebo.xacro` while we were
+diagnosing this was a workaround for Ogre 1.x. This zip ships the standard
+single-row 2D scan, which is what SLAM Toolbox expects and what a real LiDAR
+produces, and it renders four times less. ogre2 should handle it.
+
+If `/scan sees the room` fails after applying this, that assumption was wrong
+and the fix is to put the block back:
+
+```bash
+cd ~/arc_ws/src/arc-course
+python3 - <<'EOF'
+import pathlib
+p = pathlib.Path("arc_description/urdf/arc_bot.gazebo.xacro")
+s = p.read_text()
+old = "          </horizontal>\n        </scan>"
+new = ("          </horizontal>\n          <vertical>\n"
+       "            <samples>4</samples>\n            <resolution>1</resolution>\n"
+       "            <min_angle>-0.02</min_angle>\n            <max_angle>0.02</max_angle>\n"
+       "          </vertical>\n        </scan>")
+assert old in s
+p.write_text(s.replace(old, new))
+print("vertical block restored")
+EOF
+cd ~/arc_ws && colcon build --packages-select arc_description --symlink-install --allow-overriding arc_description
+```
+
+Tell me either way and I will make it permanent.
