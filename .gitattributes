@@ -1,0 +1,54 @@
+# Line endings.
+#
+# This repository is authored on Windows and run on Linux. Without this file
+# the two disagree about how a line ends, and the disagreement is invisible
+# until it is expensive:
+#
+#   * A shell script committed with CRLF fails on the VM with the useless
+#     message "bad interpreter: /usr/bin/env bash^M". The caret-M is the
+#     carriage return being read as part of the interpreter's name.
+#   * A Python node with CRLF usually runs, so the problem hides until
+#     something parses the file itself.
+#   * arc-setup runs dos2unix to repair the first case, which rewrites the
+#     file, which makes git report a modification, which blocks the next pull.
+#
+# `text=auto eol=lf` tells git to store every text file with LF and to check it
+# out with LF on every platform, Windows included. Modern editors on Windows,
+# including VS Code and Notepad, handle LF without complaint, so there is no
+# cost on that side and the ambiguity disappears from both.
+#
+# After adding this file, normalise what is already committed, once:
+#
+#     git add --renormalize .
+#     git commit -m "Normalise line endings to LF"
+#
+# That commit will look enormous and change no code. It is rewriting the stored
+# line endings of every text file, which is exactly what it should do.
+
+* text=auto eol=lf
+
+# Files that must be preserved byte for byte. Running line-ending conversion
+# over any of these corrupts them silently, and a corrupt mesh or map is a
+# confusing thing to debug because the error surfaces far from the cause.
+
+*.png     binary
+*.jpg     binary
+*.jpeg    binary
+*.gif     binary
+*.ico     binary
+*.pdf     binary
+*.zip     binary
+*.gz      binary
+*.pgm     binary
+*.pbm     binary
+*.bag     binary
+*.db3     binary
+*.mcap    binary
+*.stl     binary
+*.dae     binary
+*.mp4     binary
+*.npy     binary
+*.npz     binary
+*.ttf     binary
+*.woff    binary
+*.woff2   binary

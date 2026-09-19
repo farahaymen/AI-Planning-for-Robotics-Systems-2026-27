@@ -14,7 +14,8 @@
 # student working from a fork sets it once and never again.
 #
 # Steps it performs, in order:
-#   1. clone or pull the repository
+#   1. clone or pull the repository, setting any local edits aside and putting
+#      them back afterwards, so an unfinished exercise never blocks an update
 #   2. repair executable bits lost through Windows
 #   3. create the course working directories
 #   4. resolve dependencies with rosdep
@@ -85,8 +86,65 @@ fi
 
 # ----- 2. clone or pull -----------------------------------------------------
 if [[ -d "$SRC/.git" ]]; then
+  # A repository authored on Windows and checked out on Linux disagrees with
+  # itself in two ways, and both make git call an untouched tree dirty:
+  #
+  #   * file MODE. Git tracks the executable bit as part of the file mode.
+  #     Windows cannot set it, so a script arrives committed as 100644, step 3
+  #     below chmods it to 100755, and git reports a modification that is not a
+  #     change to the file's contents at all.
+  #   * line ENDINGS. A file committed with CRLF gets rewritten to LF by the
+  #     dos2unix pass in step 3, which is a difference git can also see.
+  #
+  # Which means this script was dirtying the working tree on every run and then
+  # refusing to pull on the next one because of the dirt it had made itself.
+  # Setting core.fileMode on this clone removes the first cause. The
+  # .gitattributes file in the repository removes the second, by pinning every
+  # text file to LF in the index so there is nothing for dos2unix to change.
+  git -C "$SRC" config core.fileMode false
+
   say "updating the repository"
-  git -C "$SRC" pull --ff-only || die "pull failed. Commit or stash local changes first."
+
+  # Only TRACKED modifications block a fast-forward pull, so that is what we
+  # test for. Untracked files are left alone: stashing them would sweep up
+  # __pycache__ and every map a student has saved, and git's own message for
+  # the rare case where an untracked file is in the way is already clear.
+  STASH=""
+  if ! git -C "$SRC" diff --quiet || ! git -C "$SRC" diff --cached --quiet; then
+    STASH="arc-setup $(date '+%Y-%m-%d %H:%M:%S')"
+    # Against HEAD, so a change that is already staged is counted too.
+    note "local edits found in $(git -C "$SRC" diff --name-only HEAD | wc -l) file(s), setting them aside"
+    git -C "$SRC" stash push -q -m "$STASH" \
+      || die "could not set local changes aside. Run: git -C $SRC status"
+  fi
+
+  if ! git -C "$SRC" pull --ff-only; then
+    if [[ -n "$STASH" ]]; then
+      git -C "$SRC" stash pop -q 2>/dev/null && note "your edits have been put back"
+    fi
+    die "pull failed. The git message above says why."
+  fi
+
+  if [[ -n "$STASH" ]]; then
+    if git -C "$SRC" stash pop -q 2>/dev/null; then
+      note "your edits put back on top"
+    else
+      # This is a student who edited a skeleton file that the course has since
+      # changed. Nothing is lost, but it cannot be resolved automatically and
+      # guessing would throw away their exercise.
+      echo
+      echo "${warn}Your edits conflict with what was just pulled.${off}"
+      echo "    Nothing has been lost. These files now contain conflict markers,"
+      echo "    and your originals are still saved in the stash:"
+      git -C "$SRC" diff --name-only --diff-filter=U 2>/dev/null | sed 's/^/      /'
+      echo
+      echo "    Keep YOUR version of a file:  git -C $SRC checkout --theirs <file>"
+      echo "    Keep the COURSE version:      git -C $SRC checkout --ours <file>"
+      echo "    Then, for each one:           git -C $SRC add <file>"
+      echo "    Finally:                      git -C $SRC stash drop"
+      die "resolve the conflict above, then run arc-setup again."
+    fi
+  fi
 else
   say "cloning the repository"
   note "from $REPO"
