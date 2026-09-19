@@ -1,0 +1,253 @@
+#!/usr/bin/env python3
+"""
+arc-drive - drive the robot around a building on its own, so it can be mapped.
+
+Lab 5 is about SLAM. It is not about keyboard skill, and asking thirty students
+to teleop a robot around a warehouse for fifteen minutes on a virtual machine
+produces frustration, inconsistent maps, and a lab session that overruns. This
+drives instead.
+
+    arc-drive                      wander until stopped with Ctrl-C
+    arc-drive --for 300            wander for five minutes, then stop
+    arc-drive --speed 0.25         slower, which maps better
+    arc-drive --dry-run            print what it would command, publish nothing
+
+WHAT IS DRIVING
+
+The follow-the-gap controller from Lab 4, wrapped in the emergency brake from
+Lab 3, both imported from `starters/algorithms` unchanged. Nothing is
+reimplemented here. This file is the ROS plumbing and nothing else: it turns a
+LaserScan into the array those functions expect, and turns their answer into a
+Twist.
+
+That is deliberate. The algorithms the students write in Lab 3 and Lab 4 are
+the algorithms that map the building in Lab 5, which is a better argument for
+them than any amount of saying so. A student can point `ARC_REACTIVE` at their
+own file and watch their own controller do the work.
+
+WHAT IT WILL AND WILL NOT DO
+
+Gap following has no memory. It is competent in corridors and rooms, and it
+will cheerfully drive into a dead end, turn round, come out, and go straight
+back in. Left running it covers most of a building through sheer persistence,
+but it makes no promises and it never knows it is finished.
+
+That limitation is the point, and it is the bridge to Lab 7: a robot that
+remembers where it has not been yet drives to the FRONTIER, which is the
+boundary between mapped and unknown, and can therefore tell you when it has
+finished. Watch this one revisit the same aisle three times and the case for
+frontier exploration makes itself.
+
+SAFETY
+
+The emergency brake wraps the controller, so it sits between the behaviour and
+the wheels and can only ever reduce speed, never command motion. If scans stop
+arriving for more than half a second the node commands zero regardless of what
+the controller last said, because a controller acting on a stale picture of the
+world is worse than one that is not acting at all.
+"""
+
+from __future__ import annotations
+
+import argparse
+import math
+import os
+import sys
+import time
+from pathlib import Path
+
+import numpy as np
+
+# The algorithms live in the course repository rather than in an installed
+# package, because students edit them. Look in the obvious places rather than
+# requiring PYTHONPATH to be set correctly, which is a thing that goes wrong
+# quietly and is then blamed on the robot.
+CANDIDATES = [
+    os.environ.get("ARC_ALGORITHMS", ""),
+    str(Path.home() / "arc_ws" / "src" / "arc-course" / "starters" / "algorithms"),
+    str(Path(__file__).resolve().parent.parent / "starters" / "algorithms"),
+]
+
+
+def find_algorithms() -> str:
+    for c in CANDIDATES:
+        if c and (Path(c) / "reactive.py").is_file():
+            return c
+    sys.exit(
+        "cannot find starters/algorithms.\n"
+        "Looked in:\n  " + "\n  ".join(x for x in CANDIDATES if x) + "\n"
+        "Set ARC_ALGORITHMS to the folder containing reactive.py.")
+
+
+def sanitise(ranges: np.ndarray, min_range: float, max_range: float) -> np.ndarray:
+    """Turn a LaserScan's ranges into the convention the algorithms expect.
+
+    The course convention is: a finite number is a real measurement, and `inf`
+    means the beam hit nothing. Drivers are not consistent about this. Some
+    report 0.0 for no return, some report the maximum, some report NaN, and one
+    of them reports the MINIMUM, which is the most dangerous of the four because
+    it looks exactly like an obstacle pressed against the sensor.
+
+    Anything outside the sensor's own stated limits is therefore not a
+    measurement and is recorded as such.
+    """
+    out = np.asarray(ranges, dtype=float).copy()
+    out[~np.isfinite(out)] = np.inf
+    out[out < min_range] = np.inf
+    out[out > max_range] = np.inf
+    return out
+
+
+def main(argv=None) -> int:
+    p = argparse.ArgumentParser(
+        description="Drive the robot around a building on its own.")
+    p.add_argument("--speed", type=float, default=0.28, metavar="M_PER_S",
+                   help="cruising speed (default: 0.28). Slower maps better: "
+                        "the scan matcher needs overlap between consecutive "
+                        "scans, and at 10 Hz a fast robot does not give it any.")
+    p.add_argument("--ttc", type=float, default=1.2, metavar="SECONDS",
+                   help="brake below this time to impact (default: 1.2)")
+    p.add_argument("--bubble", type=float, default=0.35, metavar="METRES",
+                   help="safety bubble around the nearest obstacle")
+    p.add_argument("--for", dest="duration", type=float, default=0.0,
+                   metavar="SECONDS", help="stop after this long; 0 means never")
+    p.add_argument("--topic", default="/cmd_vel")
+    p.add_argument("--scan", default="/scan")
+    p.add_argument("--dry-run", action="store_true",
+                   help="print the commands, publish nothing")
+    args = p.parse_args(argv)
+
+    sys.path.insert(0, find_algorithms())
+    import reactive                       # noqa: E402
+    from sensing import LidarSpec         # noqa: E402
+
+    import rclpy
+    from geometry_msgs.msg import Twist
+    from rclpy.qos import qos_profile_sensor_data
+    from sensor_msgs.msg import LaserScan
+
+    rclpy.init()
+    node = rclpy.create_node("arc_drive")
+    publisher = node.create_publisher(Twist, args.topic, 10)
+
+    state = {"controller": None, "raw": None, "spec": None, "last_scan": 0.0,
+             "started": time.time(), "last_report": 0.0, "commands": 0,
+             "braked": 0, "v": 0.0, "w": 0.0, "nearest": math.inf,
+             "stop": False}
+
+    def build(msg: LaserScan):
+        """Construct the controller from the SENSOR, not from assumptions.
+
+        The course LidarSpec describes the simulated sensor, but reading the
+        geometry out of the first message means this works unchanged against a
+        different simulator, a bag file, or a real scanner with 720 beams over
+        270 degrees. Hard coding 360 beams here would be the kind of assumption
+        that survives every test and fails on the one piece of hardware nobody
+        checked.
+        """
+        n = len(msg.ranges)
+        spec = LidarSpec(
+            n_beams=n,
+            min_range=float(msg.range_min),
+            max_range=float(msg.range_max),
+            angle_min=float(msg.angle_min),
+            # beam_angles uses linspace(..., endpoint=False), so the upper bound
+            # is one increment PAST the last beam. Writing angle_max here
+            # instead would squeeze every beam inwards by one increment, which
+            # is a fraction of a degree and therefore invisible until the robot
+            # is consistently clipping doorways on one side.
+            angle_max=float(msg.angle_min) + n * float(msg.angle_increment),
+        )
+        brake = reactive.make_emergency_brake(args.ttc, spec=spec)
+        follow = reactive.make_gap_follower(bubble=args.bubble,
+                                            speed=args.speed, spec=spec)
+        node.get_logger().info(
+            f"{n} beams over {math.degrees(spec.angle_max - spec.angle_min):.0f} "
+            f"degrees, {spec.min_range:.2f} to {spec.max_range:.1f} m")
+        # Both are kept. The guarded one drives; the bare one is asked the same
+        # question so we can tell when the brake actually overruled it. Running
+        # the follower twice costs a fraction of a millisecond on 360 beams and
+        # is worth it: a run where the brake never fires means the threshold is
+        # too low to be doing anything, and one where it fires constantly means
+        # the speed is too high for the building. Neither is visible otherwise.
+        return brake(follow), follow, spec
+
+    def on_scan(msg: LaserScan) -> None:
+        if state["controller"] is None:
+            state["controller"], state["raw"], state["spec"] = build(msg)
+        spec = state["spec"]
+        ranges = sanitise(msg.ranges, spec.min_range, spec.max_range)
+
+        finite = ranges[np.isfinite(ranges)]
+        state["nearest"] = float(finite.min()) if finite.size else math.inf
+
+        v, w, _ = state["controller"](None, None, 0, ranges=ranges)
+        raw_v, _, _ = state["raw"](None, None, 0, ranges=ranges)
+        if v == 0.0 and raw_v > 0.0:
+            state["braked"] += 1
+
+        state["v"], state["w"] = v, w
+        state["last_scan"] = time.time()
+        state["commands"] += 1
+
+        if not args.dry_run:
+            twist = Twist()
+            twist.linear.x = float(v)
+            twist.angular.z = float(w)
+            publisher.publish(twist)
+
+    def on_timer() -> None:
+        now = time.time()
+
+        # Failsafe. If the scans have stopped, the picture the controller is
+        # acting on is stale and the only safe command is zero.
+        if state["last_scan"] and (now - state["last_scan"]) > 0.5:
+            if not args.dry_run:
+                publisher.publish(Twist())
+            node.get_logger().warn("no scan for 0.5 s, holding still",
+                                   throttle_duration_sec=5.0)
+
+        if now - state["last_report"] >= 5.0:
+            state["last_report"] = now
+            elapsed = now - state["started"]
+            print(f"  {elapsed:5.0f} s   v {state['v']:5.2f} m/s   "
+                  f"w {state['w']:+5.2f} rad/s   "
+                  f"nearest {state['nearest']:5.2f} m   "
+                  f"brake fired {state['braked']} times", flush=True)
+
+        if args.duration and (now - state["started"]) >= args.duration:
+            state["stop"] = True
+
+    node.create_subscription(LaserScan, args.scan, on_scan,
+                             qos_profile_sensor_data)
+    node.create_timer(0.2, on_timer)
+
+    print(f"driving with follow-the-gap at {args.speed:.2f} m/s, "
+          f"braking below {args.ttc:.1f} s to impact")
+    if args.dry_run:
+        print("dry run: nothing will be published")
+    print("Ctrl-C to stop\n")
+
+    try:
+        while rclpy.ok() and not state["stop"]:
+            rclpy.spin_once(node, timeout_sec=0.1)
+    except KeyboardInterrupt:
+        print()
+    finally:
+        # Stop properly. One message can be lost; the robot carrying on into a
+        # wall after the operator pressed Ctrl-C is not an acceptable outcome of
+        # a dropped packet.
+        if not args.dry_run:
+            for _ in range(5):
+                publisher.publish(Twist())
+                time.sleep(0.05)
+        elapsed = time.time() - state["started"]
+        print(f"stopped after {elapsed:.0f} s, {state['commands']} commands, "
+              f"brake fired {state['braked']} times")
+        node.destroy_node()
+        rclpy.shutdown()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

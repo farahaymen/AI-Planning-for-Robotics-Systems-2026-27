@@ -138,7 +138,7 @@ class MapWatcher:
 
     def __init__(self, node, base_frame: str, map_frame: str):
         import tf2_ros
-        from nav_msgs.msg import OccupancyGrid
+        from nav_msgs.msg import OccupancyGrid, Odometry
         from rclpy.qos import (DurabilityPolicy, HistoryPolicy, QoSProfile,
                                ReliabilityPolicy)
 
@@ -150,7 +150,27 @@ class MapWatcher:
         self.info = None
         self.stamp = 0.0
         self.trail: list[tuple[float, float]] = []
+        self.odom_trail: list[tuple[float, float]] = []
         self.pose: tuple[float, float, float] | None = None
+
+        # Raw wheel odometry, drawn alongside the SLAM estimate.
+        #
+        # These two lines are the argument for SLAM in one picture. Odometry is
+        # SMOOTH because it integrates wheel rotation, and WRONG because every
+        # slip and every rounding error is added to the total and never removed.
+        # The SLAM estimate is JAGGED because the scan matcher corrects it
+        # against the world several times a second, and each correction moves
+        # the whole history, and it is RIGHT for exactly that reason.
+        #
+        # A student watching the red line jitter will assume the robot is
+        # wobbling. It is not. The robot is driving straight and the estimate is
+        # catching up. Seeing the smooth line sail off through a wall while the
+        # jagged one stays in the corridor settles that permanently.
+        #
+        # The two frames coincide at startup, so plotting odometry in its own
+        # frame is the honest comparison: they begin together and separate by
+        # exactly the accumulated drift.
+        node.create_subscription(Odometry, "/odom", self._on_odom, 10)
 
         # SLAM Toolbox publishes /map LATCHED: transient local durability, depth
         # 1. A subscriber with the default volatile QoS will connect, report no
@@ -175,6 +195,12 @@ class MapWatcher:
         self.grid = grid
         self.info = msg.info
         self.stamp = time.time()
+
+    def _on_odom(self, msg) -> None:
+        p = msg.pose.pose.position
+        if not self.odom_trail or math.hypot(
+                p.x - self.odom_trail[-1][0], p.y - self.odom_trail[-1][1]) > 0.02:
+            self.odom_trail.append((p.x, p.y))
 
     def _on_tf(self) -> None:
         """Where is the robot, in map coordinates.
@@ -222,6 +248,8 @@ class MapWatcher:
             "known_frac": float(known.sum()) / known.size,
             "driven_m": sum(math.hypot(b[0] - a[0], b[1] - a[1])
                             for a, b in zip(self.trail, self.trail[1:])),
+            "odom_m": sum(math.hypot(b[0] - a[0], b[1] - a[1])
+                          for a, b in zip(self.odom_trail, self.odom_trail[1:])),
         }
 
     def extent(self) -> tuple[float, float, float, float]:
@@ -239,67 +267,101 @@ C_UNKNOWN = "#b9bec6"
 C_FREE = "#ffffff"
 C_WALL = "#23262b"
 C_TRAIL = "#d1495b"
+C_ODOM = "#3d6fb4"
 C_ROBOT = "#2a9d8f"
+
+# Drawing every point of a long trail costs more than it shows. Past this many,
+# the line is thinned for display only; the saved files keep every point.
+MAX_TRAIL_POINTS = 2500
+
+
+def _thin(points: list[tuple[float, float]]):
+    """Return x and y lists, decimated if the trail has grown long."""
+    if not points:
+        return [], []
+    step = max(1, len(points) // MAX_TRAIL_POINTS)
+    kept = points[::step]
+    if kept[-1] != points[-1]:
+        kept.append(points[-1])
+    return [p[0] for p in kept], [p[1] for p in kept]
 
 
 def make_figure():
+    """Build the figure ONCE, with every artist it will ever need.
+
+    The first version of this cleared the axes and rebuilt every artist on each
+    frame. On a machine with a GPU that is merely wasteful. Under llvmpipe,
+    where the whole scene is rasterised on the CPU, it is the difference
+    between a responsive window and a slideshow, and it made the robot feel
+    like it was lagging when the simulation was keeping up perfectly well.
+
+    So the artists are created here and only their DATA changes afterwards.
+    """
     import matplotlib.pyplot as plt
     from matplotlib.colors import ListedColormap
 
-    fig, ax = plt.subplots(figsize=(8.2, 7.2))
+    fig, ax = plt.subplots(figsize=(8.6, 7.4))
     if fig.canvas.manager is not None:          # None under the Agg backend
         try:
             fig.canvas.manager.set_window_title("arc-map-view")
         except AttributeError:
             pass
-    cmap = ListedColormap([C_WALL, C_UNKNOWN, C_FREE])
+
     ax.set_xlabel("x (m)", fontsize=9)
     ax.set_ylabel("y (m)", fontsize=9)
     ax.set_aspect("equal")
-    ax.tick_params(labelsize=8)
-    ax.grid(alpha=0.15)
-    return fig, ax, cmap
-
-
-def render(ax, cmap, watcher: MapWatcher, bounds: list[float] | None) -> list[float]:
-    """Draw one frame. Returns the running union of every extent seen."""
-    ax.clear()
-    ax.set_aspect("equal")
-    ax.set_xlabel("x (m)", fontsize=9)
-    ax.set_ylabel("y (m)", fontsize=9)
     ax.tick_params(labelsize=8)
     ax.grid(alpha=0.15, zorder=0)
 
+    cmap = ListedColormap([C_WALL, C_UNKNOWN, C_FREE])
+    art = {}
+    art["im"] = ax.imshow(np.ones((1, 1), dtype=int), cmap=cmap, origin="lower",
+                          extent=(0, 1, 0, 1), interpolation="nearest",
+                          vmin=0, vmax=2, zorder=1)
+    art["im"].set_visible(False)
+    art["odom"], = ax.plot([], [], color=C_ODOM, linewidth=1.2, alpha=0.85,
+                           zorder=2, label="wheel odometry: smooth, drifting")
+    art["trail"], = ax.plot([], [], color=C_TRAIL, linewidth=1.4, alpha=0.95,
+                            zorder=3, label="SLAM estimate: corrected")
+    art["heading"], = ax.plot([], [], "-", color=C_ROBOT, linewidth=2.6,
+                              zorder=4, solid_capstyle="round")
+    art["robot"], = ax.plot([], [], "o", color=C_ROBOT, markersize=10,
+                            markeredgecolor="white", markeredgewidth=1.4,
+                            zorder=5)
+    art["wait"] = ax.text(0.5, 0.5, "waiting for /map\n\n"
+                                    "is slam.launch.py running?",
+                          ha="center", va="center", fontsize=12, color="#666",
+                          transform=ax.transAxes)
+    ax.legend(loc="upper right", fontsize=8, framealpha=0.92)
+    return fig, ax, art
+
+
+def render(ax, art, watcher: MapWatcher, bounds: list[float] | None) -> list[float]:
+    """Update one frame. Returns the running union of every extent seen."""
     if watcher.grid is None:
-        ax.text(0.5, 0.5, "waiting for /map\n\n"
-                          "is slam.launch.py running?",
-                ha="center", va="center", fontsize=12, color="#666",
-                transform=ax.transAxes)
         return bounds or [0, 1, 0, 1]
 
+    art["wait"].set_visible(False)
+    art["im"].set_visible(True)
+
     grid = watcher.grid
-    canvas = np.ones(grid.shape, dtype=int)            # unknown
+    canvas = np.ones(grid.shape, dtype=int)              # unknown
     known = grid != UNKNOWN
-    canvas[known & (grid <= FREE_THRESH * 100)] = 2    # free
+    canvas[known & (grid <= FREE_THRESH * 100)] = 2      # free
     canvas[known & (grid >= OCCUPIED_THRESH * 100)] = 0  # wall
 
     e = watcher.extent()
-    ax.imshow(canvas, cmap=cmap, origin="lower", extent=e,
-              interpolation="nearest", vmin=0, vmax=2, zorder=1)
+    art["im"].set_data(canvas)
+    art["im"].set_extent(e)
 
-    if len(watcher.trail) > 1:
-        xs = [p[0] for p in watcher.trail]
-        ys = [p[1] for p in watcher.trail]
-        ax.plot(xs, ys, color=C_TRAIL, linewidth=1.3, alpha=0.95, zorder=3,
-                label="driven")
+    art["odom"].set_data(*_thin(watcher.odom_trail))
+    art["trail"].set_data(*_thin(watcher.trail))
 
     if watcher.pose is not None:
         x, y, yaw = watcher.pose
-        ax.plot(x, y, "o", color=C_ROBOT, markersize=10,
-                markeredgecolor="white", markeredgewidth=1.4, zorder=4)
-        ax.arrow(x, y, 0.45 * math.cos(yaw), 0.45 * math.sin(yaw),
-                 head_width=0.16, head_length=0.16, fc=C_ROBOT, ec=C_ROBOT,
-                 zorder=4, length_includes_head=True)
+        art["robot"].set_data([x], [y])
+        art["heading"].set_data([x, x + 0.45 * math.cos(yaw)],
+                                [y, y + 0.45 * math.sin(yaw)])
 
     # The window only ever grows, so an early frame and a late one can be laid
     # side by side and compared honestly.
@@ -313,9 +375,15 @@ def render(ax, cmap, watcher: MapWatcher, bounds: list[float] | None) -> list[fl
     ax.set_ylim(bounds[2] - pad, bounds[3] + pad)
 
     s = watcher.stats()
+    drift = ""
+    if s["odom_m"] > 0.5 and s["driven_m"] > 0.5:
+        # Not an error measurement, just the difference in how far each thinks
+        # it has gone. The real drift is the gap between the two lines.
+        drift = (f"   ·   odometry says {s['odom_m']:.1f} m, "
+                 f"SLAM says {s['driven_m']:.1f} m")
     ax.set_title(
         f"mapped {s['free_m2']:.1f} m² of floor and {s['wall_m2']:.1f} m² of wall"
-        f"   ·   driven {s['driven_m']:.1f} m\n"
+        f"{drift}\n"
         f"grid {s['width_m']:.1f} × {s['height_m']:.1f} m at "
         f"{s['resolution']*100:.0f} cm per cell   ·   "
         f"{s['known_frac']*100:.0f}% of the grid explored",
@@ -407,6 +475,10 @@ def main(argv=None) -> int:
                    metavar="SECONDS", help="stop after this long; 0 means never")
     p.add_argument("--headless", action="store_true",
                    help="no window, snapshots only. Implies --every 30 if unset.")
+    p.add_argument("--redraw", type=float, default=0.5, metavar="SECONDS",
+                   help="how often to repaint the window (default: 0.5). "
+                        "Raise it on a slow machine; the map still updates, "
+                        "the picture is just refreshed less often.")
     p.add_argument("--base-frame", default="base_link")
     p.add_argument("--map-frame", default="map")
     args = p.parse_args(argv)
@@ -437,7 +509,7 @@ def main(argv=None) -> int:
     executor.start()
 
     out_dir = Path(args.out).expanduser()
-    fig, ax, cmap = make_figure()
+    fig, ax, art = make_figure()
     frames: list[Path] = []
     bounds = None
     state = {"running": True, "index": 0, "last_save": 0.0, "clear": False,
@@ -472,15 +544,16 @@ def main(argv=None) -> int:
         while state["running"]:
             if state["clear"]:
                 watcher.trail.clear()
+                watcher.odom_trail.clear()
                 state["clear"] = False
 
-            bounds = render(ax, cmap, watcher, bounds)
+            bounds = render(ax, art, watcher, bounds)
 
             if not headless:
                 fig.canvas.draw_idle()
-                plt.pause(0.25)
+                plt.pause(max(0.05, args.redraw))
             else:
-                time.sleep(0.25)
+                time.sleep(max(0.05, args.redraw))
 
             now = time.time()
             due = args.every > 0 and (now - state["last_save"]) >= args.every

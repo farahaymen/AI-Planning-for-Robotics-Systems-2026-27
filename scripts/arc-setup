@@ -215,7 +215,7 @@ note "$(ls "$WS/install" | grep -c '^arc_') arc packages installed"
 
 # ----- 7. install the course commands --------------------------------------
 say "installing course commands"
-for tool in course-check course-smoke-test arc-clean arc-setup arc-map-view; do
+for tool in course-check course-smoke-test arc-clean arc-setup arc-map-view arc-drive; do
   if [[ -f "$SRC/scripts/$tool" ]]; then
     sudo install -m 0755 "$SRC/scripts/$tool" "/usr/local/bin/$tool" \
       && note "$tool"
