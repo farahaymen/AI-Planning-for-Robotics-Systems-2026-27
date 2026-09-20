@@ -142,7 +142,10 @@ local_costmap:
           obstacle_min_range: 0.0
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
-        # This is the parameter you will vary in Experiment 6.2.
+        # Local inflation shapes the costmap the CONTROLLER samples against, so
+        # it changes how close the robot is willing to pass an obstacle it can
+        # currently see. It does not change the route. Experiment 6.3 varies the
+        # global value below, not this one.
         inflation_radius: 0.55
         cost_scaling_factor: 3.0
       always_send_full_costmap: true
@@ -177,6 +180,10 @@ global_costmap:
           obstacle_max_range: 8.0
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
+        # This is the parameter you vary in Experiment 6.3. Global inflation
+        # shapes the map the PLANNER searches, so it changes the route. Note
+        # that lethal cost is written only out to robot_radius; beyond that the
+        # cost decays and NavFn still plans through it.
         inflation_radius: 0.55
         cost_scaling_factor: 3.0
       always_send_full_costmap: true
@@ -189,7 +196,7 @@ planner_server:
     GridBased:
       # NavFn implements Dijkstra by default. Setting use_astar to true selects
       # the A* variant you implemented by hand in the planning notebook. Running
-      # both and comparing the resulting paths is Exercise 6.1.
+      # both and comparing the resulting paths is Exercise 6.2.
       plugin: "nav2_navfn_planner::NavfnPlanner"
       tolerance: 0.5
       use_astar: false

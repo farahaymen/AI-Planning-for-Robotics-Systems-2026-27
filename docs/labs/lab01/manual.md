@@ -175,7 +175,7 @@ pushed before you leave, because the virtual machine does not survive the end of
 the session.
 
 ```
-cd ~/arc_ws/src
+cd ~/arc_ws/src/arc-course
 git remote -v
 git checkout -b lab01-$(whoami)
 ```
@@ -197,33 +197,57 @@ point.
 
 ```python
 #!/usr/bin/env python3
-"""Publishes a fake range reading at 10 Hz, the rate of the real LiDAR."""
+"""Publishes a fake range reading at 10 Hz, the rate of the real LiDAR.
+
+Exercise 1.2 asks you to change the publisher QoS to best effort and observe
+that the default subscriber then receives nothing, with no error anywhere.
+
+Exercise 1.3 asks you to change the rate at runtime with `ros2 param set`.
+"""
 
 import math
 
 import rclpy
 from rclpy.node import Node
+from rcl_interfaces.msg import SetParametersResult
 from std_msgs.msg import Float32
 
 
 class RangeSource(Node):
     def __init__(self):
         super().__init__("range_source")
-
-        # Parameters are declared, not hard coded. Declaring them means you can
-        # change the rate from the command line without editing this file, which
-        # is how every configurable node in this course behaves.
+        # Declared, not hard coded, so `ros2 param set` works at runtime.
         self.declare_parameter("rate_hz", 10.0)
         self.declare_parameter("amplitude", 2.0)
-        rate = self.get_parameter("rate_hz").value
+        self.rate = float(self.get_parameter("rate_hz").value)
 
         self.publisher = self.create_publisher(Float32, "range", 10)
-
-        # A timer, not a while loop. The executor owns the thread; a while loop
-        # here would block callbacks and the node would stop responding.
-        self.timer = self.create_timer(1.0 / rate, self.tick)
+        # A timer, not a while loop. rclpy.spin hands the thread to an executor;
+        # a while loop here starves every other callback and the node looks
+        # alive while silently ignoring everything.
+        self.timer = self.create_timer(1.0 / self.rate, self.tick)
         self.k = 0
-        self.get_logger().info(f"publishing /range at {rate} Hz")
+
+        # Declaring a parameter makes it settable, not live. A timer keeps the
+        # period it was created with, so changing rate_hz does nothing until the
+        # timer is rebuilt. This callback does that.
+        self.add_on_set_parameters_callback(self.on_parameters)
+        self.get_logger().info(f"publishing /range at {self.rate} Hz")
+
+    def on_parameters(self, params):
+        for p in params:
+            if p.name != "rate_hz":
+                continue
+            # Reject before applying. Returning successful=False leaves the old
+            # value in place, which is better than dividing by zero here.
+            if p.value <= 0.0:
+                return SetParametersResult(
+                    successful=False, reason="rate_hz must be greater than zero")
+            self.rate = float(p.value)
+            self.timer.cancel()
+            self.timer = self.create_timer(1.0 / self.rate, self.tick)
+            self.get_logger().info(f"rate changed to {self.rate} Hz")
+        return SetParametersResult(successful=True)
 
     def tick(self):
         amplitude = self.get_parameter("amplitude").value
@@ -258,7 +282,13 @@ everything. This is a common first mistake and it produces very confusing
 symptoms.
 
 Declaring parameters rather than hard coding constants is what allows
-`ros2 param set /range_source rate_hz 2.0` to work while the node runs. Nav2 is
+`ros2 param set /range_source rate_hz 2.0` to reach the node while it runs.
+Declaring alone does not change any behaviour. A timer keeps the period it was
+created with, so a new `rate_hz` is stored and the publication rate stays where
+it was. `add_on_set_parameters_callback` runs on every set. It cancels the timer
+and creates a new one at the new period, which is what makes the rate change
+take effect. It also rejects a rate of zero or less before the value is applied,
+so the node cannot be made to divide by zero from the command line. Nav2 is
 configured entirely this way.
 
 The `try` and `finally` around `spin` means Ctrl-C shuts the node down cleanly
@@ -471,6 +501,7 @@ Commit and push, then submit:
 Run the self check first:
 
 ```
+cd ~/arc_ws/src/arc-course
 pytest starters/lab01/tests -v
 ```
 
@@ -579,3 +610,15 @@ of every pattern in this lab in both Python and C++.
 ROS 2 design and architecture talks from ROSCon, available on the Open Robotics
 YouTube channel. Prefer the maintainer talks over general tutorials; they explain
 the reasoning behind decisions rather than only the syntax.
+
+---
+
+## Further reading
+
+`docs/references.md` has a fuller list under **Lab 1. ROS 2 middleware**, with
+papers, industry write-ups and the documentation worth keeping open. Every entry
+says what you get from it and which part of the lab it connects to.
+
+If you read one thing, read *Dependency Chain Analysis of ROS 2 DDS QoS
+Policies* (Lee, Kang and Park, 2025). It maps how sixteen QoS policies depend on
+each other, which is the theory behind the silent failure in Exercise 1.2.

@@ -11,21 +11,44 @@ ROS 2 Jazzy, Gazebo Harmonic).
 | `docs/proposal.md` | Reviewers. The case for the redesign, in ten pages. |
 | `docs/golden_vm_build_runbook.md` | You, first. How to build and validate the VM, stage by stage. |
 | `docs/00_design_baseline.md` | You. Thirty numbered decisions everything else depends on. |
-| `docs/labs/lab*/manual.md` | Students. One manual per laboratory. |
+| `docs/labs/lab01..lab10/manual.md` | Students. One manual per laboratory, ten in all. |
 | `docs/labs/lab*/validation_checklist.md` | Demonstrators. Sign off before release. |
-| `docs/projects/` | Students. Project 1 and the Grand Challenge. |
+| `docs/projects/project1_specification.md` | Students. Mapping and navigation system, 25 percent, weeks 3 to 6. |
+| `docs/projects/project2_specification.md` | Students. The Grand Challenge, 40 percent, weeks 9 to 12. |
+| `docs/references.md` | Everyone. Further reading, one section per lab plus Applications. |
 
 ## Layout
 
 ```
 arc_description/     reference robot: URDF, Xacro, controllers
-arc_nav/             Nav2 configuration (DWB and MPPI), launch
+arc_gazebo/          worlds, simulation launch, the warehouse arena
+arc_nav/             Nav2 configuration (DWB and MPPI), launch, behaviour trees
+arc_lab4/5/7/        per-lab ROS packages
 arc_rl/              nav_core.py (the observation contract), arenas, baselines
-arc_eval/            the evaluation harness, the Nav2 adapter, competition scoring
-starters/lab01..10/  student starting points and their self-check tests
-docs/                manuals, checklists, projects, proposal
-scripts/             course-check, build-manuals.sh
+arc_eval/            the evaluation harness, the Nav2 adapter, scoring, configs/
+starters/lab01..10/  per-lab starting points and their self-check tests
+starters/algorithms/ the offline notebook, Labs 3 to 5, what Project 1 is built from
+docs/                manuals, checklists, projects, references, proposal
+scripts/             the installed commands, plus provisioning and figure generation
 ```
+
+`arc_rl`, `arc_eval` and `starters` are plain Python packages, not ROS packages.
+Each carries a `COLCON_IGNORE` and no `package.xml`, so `colcon` skips them and
+`ros2 run` will not find them. Read `starters/README.md` for how to run a suite
+against your own work.
+
+## Installed commands
+
+`scripts/` is on the path in the Golden VM.
+
+| Command | What it does |
+|---------|--------------|
+| `arc-setup` | Clone or update the course workspace, build it, verify it. |
+| `arc-clean` | Stop every process a course launch starts. |
+| `course-check` | Is everything present. The gate that decides whether a VM is usable. |
+| `course-smoke-test` | Does the robot actually move. The gate `course-check` cannot be. |
+| `arc-map-view` | Watch a SLAM map build without OpenGL, for machines RViz will not serve. |
+| `arc-drive` | Drive the robot around a building on its own, so it can be mapped. |
 
 ## Build the documents
 
@@ -40,8 +63,11 @@ silently drops equations when exporting a Word file to PDF.
 ## Run the tests
 
 ```bash
-python3 -m pytest starters arc_eval -q     # 87 tests, no ROS required
+python3 -m pytest starters arc_eval -q     # 282 pass, 1 skipped, no ROS required
 ```
+
+The skip is a Nav2 integration test that needs a live stack; it runs with
+`ARC_INTEGRATION=1` and a navigation stack up.
 
 Everything under `starters/` and `arc_eval/` is pure Python and runs without ROS
 or Gazebo, which is also why every graded task has a fallback for machines where
@@ -53,8 +79,12 @@ Gazebo will not start.
 export PYTHONPATH=.
 python3 starters/lab09/train.py --reward dense_progress --steps 200000
 python3 -m arc_eval.runner --config arc_eval/configs/gap_follow.yaml
-python3 -m arc_eval.runner --compare results/a.json results/b.json
+python3 -m arc_eval.runner --config arc_eval/configs/lab09_dense.yaml
+python3 -m arc_eval.runner --compare results/gap_follow.json results/ppo_dense_progress.json
 ```
+
+Training writes TensorBoard logs to `runs/` and the policy to `models/`.
+`arc_eval/configs/` holds one YAML per benchmarked system.
 
 Measured on the reference machine: 200,000 PPO steps in 1.9 minutes on one CPU
 thread. Training happens in the NumPy surrogate; evaluation and deployment happen

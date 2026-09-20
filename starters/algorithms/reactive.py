@@ -1,26 +1,18 @@
 """
-Two reactive behaviours: emergency braking, and follow the gap.
+Two reactive behaviours: emergency braking and follow the gap.
 
-Reactive means no map, no plan, no memory. Scan in, velocity out, every cycle.
-That sounds primitive and it is the most important layer in the robot, for one
-reason: **it is the only part that still works when everything above it is
-wrong.**
+Reactive means no map, no plan and no memory. Scan in, velocity out, every
+cycle. It keeps working when the planner is confused or the localiser is lost,
+which is why the emergency stop must not share code or state with the
+navigation stack.
 
-A planner can be confused. A localiser can be lost. A behaviour tree can be
-stuck in a branch nobody tested. None of that matters to a controller that only
-ever asks "is there something in front of me, and how fast am I approaching
-it". That independence is the whole design argument, and it is why the emergency
-stop must NOT share code, state or assumptions with the navigation stack.
+Emergency braking is the safety layer. Its production equivalent is Nav2's
+Collision Monitor, configured in Lab 7.
 
-**Emergency braking** is the safety layer. You will write it in Lab 3 and
-configure its production equivalent, Nav2's Collision Monitor, in Lab 7.
+Follow the gap navigates with no map. It is also the classical baseline the
+learned policies in Lab 9 are measured against.
 
-**Follow the gap** is a complete navigator with no map at all. It is also the
-classical baseline that the reinforcement learning policies in Lab 9 are
-measured against, so writing it here means that comparison is against something
-you understand rather than a number you were handed.
-
-REFERENCE IMPLEMENTATION. The version you fill in is `reactive_skeleton.py`.
+Reference implementation. The version you fill in is `reactive_skeleton.py`.
 """
 
 from __future__ import annotations
@@ -42,23 +34,17 @@ def time_to_collision(ranges: np.ndarray, v: float,
                       half_width: float = 0.25) -> float:
     """Seconds until impact if the robot keeps its current forward speed.
 
-    For a beam at angle `a`, the range shrinks at a rate of `v * cos(a)` as the
-    robot drives forwards. Time to collision for that beam is therefore
+    For a beam at angle `a` the range closes at `v * cos(a)`, so
 
         ttc = (range - stopping_margin) / (v * cos(a))
 
-    and only for beams where the range is actually closing. The answer is the
-    smallest such time over every beam in the robot's corridor.
+    counted only over beams that are actually closing, in the robot's corridor.
 
-    **Why time and not distance.** The obvious emergency stop is "brake if
-    anything is nearer than 0.4 m", and it is wrong in both directions at once.
-    At 0.05 m/s that stops the robot from ever docking or passing through a
-    doorway. At 0.5 m/s it triggers far too late, because the robot travels
-    0.4 m in less than a second and cannot stop in that distance. Distance is
-    the wrong quantity; the question is always how much TIME you have.
+    A fixed distance threshold does not work here. Brake below 0.4 m and at
+    0.05 m/s the robot can never pass through a doorway, while at 0.5 m/s it
+    covers 0.4 m in under a second and cannot stop in time.
 
-    Returns `inf` when nothing is closing, which is the correct answer for a
-    stationary robot or a clear corridor.
+    Returns `inf` when nothing is closing.
     """
     if v <= 0.0:
         return math.inf                      # reversing and stopping are safe here
@@ -82,20 +68,14 @@ def make_emergency_brake(threshold_s: float = 1.2, half_width: float = 0.25,
                          spec: LidarSpec = LIDAR):
     """Wrap any controller in a safety layer that can only ever slow it down.
 
-    The shape of this matters as much as the arithmetic. It takes a controller
-    and returns a controller, so it sits BETWEEN the navigation stack and the
-    wheels and cannot be bypassed by a planner having a bad day. It can veto and
-    it can never command motion, which is the property that makes it a safety
-    layer rather than another behaviour.
+    Takes a controller and returns a controller, so it sits between the
+    navigation stack and the wheels. It can veto motion and can never command
+    it, which is what makes it a safety layer rather than another behaviour.
 
-    Nav2's Collision Monitor is the same idea with more configuration: it
-    watches the velocity command, projects the footprint forward along it, and
-    slows or stops if that projection hits anything. You configure it in Lab 7.
-    This is its thirty line ancestor.
+    Nav2's Collision Monitor does the same job with more configuration.
 
-    `threshold_s` of 1.2 is a starting point, not a truth. Exercise 3.5 asks you
-    to find the value where the robot neither stops in open doorways nor hits
-    the wall, and to say what it depends on.
+    `threshold_s` of 1.2 is a starting point. Exercise 3.5 asks you to find the
+    value where the robot neither stops in open doorways nor hits the wall.
     """
     def wrap(controller):
         def guarded(*args, **kwargs):
@@ -109,9 +89,8 @@ def make_emergency_brake(threshold_s: float = 1.2, half_width: float = 0.25,
 
             ttc = time_to_collision(ranges, v, spec, half_width)
             if ttc < threshold_s:
-                # Stop translating. Keep the turn: rotating on the spot is how
-                # the robot gets out of the situation, and freezing both would
-                # leave it stuck against the wall forever.
+                # Stop translating but keep the turn. Rotating on the spot is
+                # how the robot gets out; freezing both leaves it stuck.
                 return (0.0, w, *rest)
             return out
         return guarded

@@ -2,14 +2,10 @@
 """
 arc-map-view - watch a SLAM map build, without OpenGL.
 
-RViz draws its Map display through Ogre, and Ogre needs a GPU shader path that
-the Golden VM does not have. Under llvmpipe the Map display fails to link its
-shader and shows grey static, which leaves you driving blind: the map is being
-built correctly, you simply cannot see it happening.
-
-This tool subscribes to the same topic RViz does and draws it with matplotlib,
-which is a software rasteriser and has no opinion about your graphics driver.
-It works on every machine the course supports, including a headless one.
+RViz draws its Map display through Ogre. Under llvmpipe the shader fails to
+link and the display shows grey static, so you cannot see the map being built.
+This tool subscribes to the same topic and draws it with matplotlib, which is a
+software rasteriser and works on every machine the course supports.
 
     arc-map-view                                  live window
     arc-map-view --every 20                       live window, snapshot every 20 s
@@ -153,23 +149,12 @@ class MapWatcher:
         self.odom_trail: list[tuple[float, float]] = []
         self.pose: tuple[float, float, float] | None = None
 
-        # Raw wheel odometry, drawn alongside the SLAM estimate.
-        #
-        # These two lines are the argument for SLAM in one picture. Odometry is
-        # SMOOTH because it integrates wheel rotation, and WRONG because every
-        # slip and every rounding error is added to the total and never removed.
-        # The SLAM estimate is JAGGED because the scan matcher corrects it
-        # against the world several times a second, and each correction moves
-        # the whole history, and it is RIGHT for exactly that reason.
-        #
-        # A student watching the red line jitter will assume the robot is
-        # wobbling. It is not. The robot is driving straight and the estimate is
-        # catching up. Seeing the smooth line sail off through a wall while the
-        # jagged one stays in the corridor settles that permanently.
+        # Raw wheel odometry, drawn alongside the SLAM estimate. Odometry is
+        # smooth and drifts; the SLAM estimate is jagged because the scan
+        # matcher keeps correcting it, and it stays correct.
         #
         # The two frames coincide at startup, so plotting odometry in its own
-        # frame is the honest comparison: they begin together and separate by
-        # exactly the accumulated drift.
+        # frame makes the gap between the lines the accumulated drift.
         node.create_subscription(Odometry, "/odom", self._on_odom, 10)
 
         # SLAM Toolbox publishes /map LATCHED: transient local durability, depth
@@ -585,6 +570,15 @@ def main(argv=None) -> int:
                   f"{s['wall_m2']:.1f} m² of wall, driven {s['driven_m']:.1f} m")
             print(f"  {out_dir / (args.name + '_%03d.pgm' % state['index'])}")
             print(f"  {out_dir / (args.name + '_%03d.yaml' % state['index'])}")
+        else:
+            # Same rule as arc-drive: never let a run end quietly having done
+            # nothing. No map arrived, and the reason is almost always that one
+            # of the two terminals this depends on is not running.
+            print("\nNOTHING was received on /map, so no map was saved.")
+            print("  Both of these need to be running first:")
+            print("    ros2 launch arc_gazebo simulation.launch.py headless:=true")
+            print("    ros2 launch arc_nav slam.launch.py")
+            print("  Check with:  ros2 topic hz /map")
 
         sheet = contact_sheet(frames, out_dir / f"{args.name}_sheet.png")
         if sheet:

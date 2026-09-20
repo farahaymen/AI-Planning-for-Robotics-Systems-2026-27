@@ -128,24 +128,20 @@ def boustrophedon(grid: np.ndarray, spacing: int, axis: int = 0,
         if not runs:
             continue
 
-        # TODO 3: drive the runs in alternating order. On a forward stripe take
-        #         them left to right; on the next, right to left. That is what
-        #         "as the ox turns" means and it is what keeps the turns short.
-        #         Driving every stripe the same way adds a full traverse of the
-        #         room between passes, all of it wasted.
+        # TODO 3: drive the runs in alternating order, left to right on one
+        #         stripe and right to left on the next. Driving every stripe
+        #         the same way adds a wasted traverse of the room between them.
         #
-        # TODO 4: build the list of cells for each run with _cell(axis, line, i),
-        #         in the direction you are driving it.
+        # TODO 4: build each run's cells with _cell(axis, line, i), in the
+        #         direction you are driving it.
         #
         # TODO 5: if the path is not empty and `connect` is set, join the last
-        #         cell of the path to the first cell of this run with _connect.
-        #         If it returns None the run is unreachable, so skip it.
+        #         cell of the path to the run's first cell with _connect. None
+        #         means unreachable, so skip that run.
         #
-        #         The bridge already ENDS at the run's first cell, so append
-        #         bridge[1:] and then run_cells[1:]. Appending the whole run
-        #         after the bridge repeats that cell, and a repeated point is a
-        #         zero length step that every consumer downstream treats as a
-        #         teleport or a divide by zero. There is a test for it.
+        #         The bridge already ends at the run's first cell, so append
+        #         bridge[1:] then run_cells[1:]. Appending the whole run repeats
+        #         that cell and leaves a zero length step. There is a test.
         #
         #         Increment result.segments for each run you drive.
         raise NotImplementedError("TODO: implement boustrophedon")

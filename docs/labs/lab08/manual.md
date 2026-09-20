@@ -9,8 +9,9 @@ date: "Duration 2 hours | ARC VM 2026.1"
 
 **Course** Autonomous Robotics with ROS 2: Mapping, Navigation and Reinforcement Learning
 **Duration** 2 hours
-**Environment** ARC VM 2026.1. The training environment is pure NumPy and runs in every graphics tier.
-**Packages** `gymnasium`, `numpy`, `stable_baselines3`, `rclpy`, `arc_rl`
+**Environment** ARC VM 2026.1. The training environment is a Gymnasium `Env` with NumPy dynamics. It has no physics engine and no renderer, so it runs in every graphics tier.
+**Python packages** `gymnasium`, `numpy`, `stable_baselines3`, `rclpy`
+**Course modules** `arc_rl`, in the repository root. It is a plain Python package, not a ROS package: it carries a `COLCON_IGNORE` and no `package.xml`, so `colcon` skips it and there is nothing for `ros2 run` to find. Import it from the repository root, or with `PYTHONPATH` set to it.
 
 **Prerequisites**
 
@@ -195,14 +196,28 @@ that makes the two-environment design necessary.
 
 ### Exercise 8.1: complete the environment (35 minutes)
 
-`arc_rl/nav_core.py` is supplied with the geometry, the raycasting and the
-observation assembly complete. Four methods are marked TODO: `reset`, the pose
-integration in `step`, the termination logic, and the info dictionary.
+`starters/lab08/nav_core_skeleton.py` is the file you edit. It is
+`arc_rl/nav_core.py` with the geometry, the raycasting and the observation
+assembly left complete and twelve TODOs opened up across `reset`, the pose
+integration in `step`, the termination logic and the info dictionary.
 
-Work against the tests:
+Work against the tests. There are 14, and all 14 fail on the untouched skeleton.
+Eleven of the twelve TODOs are covered by at least one test. The exception is
+TODO 5, the domain randomisation branch in `reset`, which no test constructs;
+Lab 10 is where that one gets exercised, so write it carefully rather than
+waiting for a red test to tell you it is wrong:
 
 ```
-pytest starters/lab08/tests -v
+cd ~/arc_ws/src/arc-course
+ARC_NAV_CORE=nav_core_skeleton python3 -m pytest starters/lab08 -q
+```
+
+Without the variable the same tests run against the reference implementation in
+`arc_rl/nav_core.py`, which is a quick way to confirm the suite itself is
+healthy before you start:
+
+```
+python3 -m pytest starters/lab08 -q
 ```
 
 **Code 8.1: The step method you are completing**
@@ -343,21 +358,42 @@ policy on the same arena.
 figure per policy, side by side at the same scale. The difference should be
 obvious at a glance, since this is the plot students compare their own against.*
 
-### Exercise 8.4: look at the ROS environment (10 minutes)
+### Exercise 8.4: read the ROS evaluation adapter (10 minutes)
 
-You do not build this one; it is supplied. Read it and answer one question.
+You do not build this one; it is supplied. Read it and answer two questions.
 
 ```
-less arc_rl/ros_nav_env.py
+less arc_eval/ros_nav2_env.py
 ```
 
-It subscribes to `/scan` with best effort QoS, downsamples with the same
-`downsample_scan` the surrogate uses, gets the goal-relative pose from TF, and
-publishes a `geometry_msgs/Twist` built by the same `scale_action`.
+`Nav2EvalEnv` is how `arc_eval.runner` benchmarks the Nav2 stack through the
+same code path it uses for a trained policy. Note three things as you read. It
+subscribes to `/scan` with best effort QoS, the same reliability decision Lab 1
+spends time on and the same one your surrogate does not have to make. It imports
+`ROBOT` from `arc_rl.nav_core`, so the robot constants are shared with the
+surrogate rather than duplicated. And its `step` is not a control step at all:
+the first call sends one `NavigateToPose` goal and every later call spins the
+executor and polls for completion while accumulating metrics, which is why the
+policy the runner passes it is a stub that ignores its observation and returns
+`None`.
 
-In your exit task: name three ways the ROS environment differs physically from
-the surrogate, and predict for each whether a policy trained in the surrogate
-would do better or worse because of it.
+That last point is the exercise. `FastNavEnv` steps a policy on an observation
+vector at 20 Hz; `Nav2EvalEnv` hands one goal to a behaviour tree and waits. The
+two satisfy the same runner and report the same metrics, and they do not share
+the observation contract.
+
+In your exit task, answer both of these. First: name three ways a Gazebo backed
+environment differs physically from the surrogate, and predict for each whether
+a policy trained in the surrogate would do better or worse because of it.
+Second: `Nav2EvalEnv` cannot be used to run your trained policy against Gazebo,
+because it never gives the policy an observation to act on. Say what a
+`RosNavEnv` would have to do differently, in terms of the `ObsSpec` and
+`build_observation` you have just been working with, to close that gap.
+
+No such environment exists in this repository yet. The `arc_rl/ros_nav_env.py`
+named in the `arc_rl/nav_core.py` docstring is planned work, not a file you can
+open, and Lab 10 says where that leaves Exercise 10.1. Building it against the
+contract in `nav_core.py` is a well-scoped Project 2 topic.
 
 ### Exit task (10 minutes)
 
@@ -447,3 +483,13 @@ relevant to the reward you write here.
 `DLR-RM/rl-baselines3-zoo` on GitHub. Working hyperparameters for a large number
 of environments, and a useful reference for how a training script is normally
 structured.
+
+## Further reading
+
+`docs/references.md` has a fuller list under **Lab 8. Building a reinforcement
+learning environment**. Start with the Gymnasium paper by Towers et al.: it
+explains why `reset`, `step`, `observation_space` and `action_space` are shaped
+the way they are, which is exactly the contract you spent this lab
+implementing. If you want to see the observation contract argument made at full
+scale, the Arena 4.0 paper in the same section describes a ROS 2 platform where
+the training environment and the real navigation stack share one interface.

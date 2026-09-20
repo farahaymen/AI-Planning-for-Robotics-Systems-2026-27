@@ -10,7 +10,8 @@ date: "Duration 2 hours | ARC VM 2026.1"
 **Course** Autonomous Robotics with ROS 2: Mapping, Navigation and Reinforcement Learning
 **Duration** 2 hours
 **Environment** ARC VM 2026.1. Training is CPU only and runs in every graphics tier.
-**Packages** `stable_baselines3`, `torch`, `gymnasium`, `tensorboard`, `arc_rl`, `arc_eval`
+**Python packages** `stable_baselines3`, `torch`, `gymnasium`, `tensorboard`
+**Course modules** `arc_rl`, `arc_eval`, in the repository root. Both are plain Python packages, not ROS packages: each carries a `COLCON_IGNORE` and no `package.xml`, so `colcon` skips them and `ros2 run` will not find them. Run them as modules from the repository root, for example `python3 -m arc_eval.runner`.
 
 **Prerequisites**
 
@@ -209,19 +210,25 @@ model = PPO(
     n_steps=512,          # transitions per environment before each update
     batch_size=256,
     gae_lambda=0.95,
-    gamma=0.99,           # about 0.05 s per step, so a 3 s horizon
+    gamma=0.99,           # 0.05 s per step, so a 1/(1-gamma) = 5 s horizon
     learning_rate=3e-4,
     ent_coef=0.005,       # entropy bonus: keeps the policy exploring
     clip_range=0.2,
     n_epochs=10,
     seed=seed,
+    # Without this PPO writes no logs, and `tensorboard --logdir runs` starts
+    # cleanly and shows an empty page.
+    tensorboard_log="runs",
 )
 ```
 
-`gamma` deserves a moment. At 0.99 with a 0.05 second control period, rewards
-about three seconds away are discounted to roughly a third. That is the effective
-planning horizon of this policy, and it is why a purely learned local controller
-cannot reason about a route across a building. Lab 10 builds on that observation.
+`gamma` sets the planning horizon. At 0.99 with a 0.05 second control period,
+a reward three seconds away is worth 0.99^60 = 0.55 of its face value, a little
+over half. The conventional horizon is 1/(1 - gamma) = 100 steps, which at this
+control period is 5 seconds. Beyond that the discounting has flattened the
+signal and the policy is effectively blind. That is why a purely learned local
+controller cannot reason about a route across a building. Lab 10 builds on that
+observation.
 
 `ent_coef` is the entropy bonus, and it is what stands between you and a policy
 that commits early to a mediocre strategy. Setting it to zero is a good way to
@@ -249,11 +256,20 @@ visible before any evaluation is run.*
 Fill in the prediction column before either run finishes.
 
 ```
+python3 -m arc_eval.runner --config arc_eval/configs/gap_follow.yaml
 python3 -m arc_eval.runner --config arc_eval/configs/lab09_dense.yaml
 python3 -m arc_eval.runner --config arc_eval/configs/lab09_sparse.yaml
-python3 -m arc_eval.runner --compare results/classical.json \
+python3 -m arc_eval.runner --compare results/gap_follow.json \
     results/ppo_dense_progress.json results/ppo_sparse_safe.json
 ```
+
+`gap_follow.yaml` is the classical comparator: the follow-the-gap controller you
+wrote in Lab 3, on the same environment and the same arena generator. Read it
+before you use it. It is configured for seeds 0 to 9, not the held-out 500 to
+529, so treat it as a reference point for what the classical approach achieves
+on this generator rather than as a like-for-like held-out score. A classical
+controller has no training set, so the distinction costs it nothing; it matters
+only when you write up the comparison.
 
 Evaluation uses **seeds 500 to 529**, which the arena generator has never
 produced during training. This is a held-out set, not a test on the training
@@ -428,3 +444,13 @@ https://stable-baselines3.readthedocs.io/en/master/guide/tensorboard.html
 Pieter Abbeel, Deep Reinforcement Learning lectures, UC Berkeley, on YouTube. The
 policy gradient and PPO lectures cover the derivations this lab treats
 operationally.
+
+## Further reading
+
+`docs/references.md` has a fuller list under **Lab 9. Training a navigation
+policy**. The one to read is Laidlaw, Russell and Dragan on the effective
+horizon, which turns the discount factor arithmetic at the top of this lab into
+a usable prediction about whether learning will succeed at all. Pair it with
+Vasan et al. on sparse rewards, which is the honest counterweight to reward
+shaping and directly relevant to the dense against sparse comparison you just
+measured.

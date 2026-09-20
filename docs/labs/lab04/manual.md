@@ -15,7 +15,9 @@ date: "Duration 2 hours | ARC VM 2026.1"
 **Prerequisites**
 
 Lab 3, and specifically the bag you recorded there. If your recording is
-unusable, a reference recording is provided in `arc_lab4/data/` and costs you nothing.
+unusable, tell your demonstrator at the start of the session. Your demonstrator
+holds a recording made on the reference VM and will give you a copy, and using
+it costs you nothing. Do not spend the session collecting data again.
 The planning notebook is due today; see the appendix.
 
 ---
@@ -124,11 +126,15 @@ mark.
 
 ### Read before the session
 
-`starters/lab04/occupancy.py` contains the data structures, the Bresenham line
-tracer and the coordinate handling. The `integrate_scan` method has the sensor
-model removed and marked with TODO. Read the whole file, including the tests in
+`starters/lab04/occupancy_skeleton.py` is the file you edit. It contains the data
+structures, the Bresenham line tracer and the coordinate handling. The sensor
+model is removed from `integrate_scan` and `_update_cell`, and what belongs there
+is marked with six TODOs. Read the whole file, including the tests in
 `starters/lab04/tests`, which describe the behaviour your implementation must
 produce.
+
+`starters/lab04/occupancy.py` is the reference implementation. Do not open it
+until your own tests pass. It is there to compare against afterwards.
 
 ---
 
@@ -260,12 +266,19 @@ rather than from an assumption.
 
 ### Exercise 4.2: implement the sensor model (30 minutes)
 
-Open `occupancy.py` and complete `integrate_scan`. The tests describe exactly
-what is expected, so run them as you go:
+Open `occupancy_skeleton.py` and complete `integrate_scan` and `_update_cell`.
+The tests describe exactly what is expected, so run them as you go. The
+`ARC_OCCUPANCY` variable is what points the tests at your file rather than at the
+reference:
 
 ```
-pytest starters/lab04/tests -v
+cd ~/arc_ws/src/arc-course
+ARC_OCCUPANCY=occupancy_skeleton python3 -m pytest starters/lab04 -q
 ```
+
+Without that variable the tests import `occupancy.py`, the reference
+implementation, and they all pass without you having written anything. Once your
+own version passes, read `occupancy.py` and compare it against what you wrote.
 
 Work in this order, because each step makes the next one visible.
 
@@ -285,11 +298,16 @@ Then run it over the whole bag:
 ```python
 import numpy as np
 import matplotlib.pyplot as plt
-from occupancy import MappingParams, OccupancyMap, sensor_pose_from_base
+from occupancy_skeleton import MappingParams, OccupancyMap, sensor_pose_from_base
 
 params = MappingParams(resolution=0.05, l_occ=0.85, l_free=-0.40,
                        max_range=12.0, min_range=0.12)
-grid = OccupancyMap(width_m=14.0, height_m=14.0, origin=(-7.0, -7.0), params=params)
+# The warehouse runs from (0, 0) to (12, 12) in world coordinates and the robot
+# spawns at (1, 1), so the grid has to cover 0 to 12 with a margin. Anything
+# outside the grid is dropped silently by the in-bounds guard rather than
+# reported, so an origin of (-7, -7) loses the east wall, the north wall and two
+# of the three pillars without any error.
+grid = OccupancyMap(width_m=14.0, height_m=14.0, origin=(-1.0, -1.0), params=params)
 
 scans, odoms = read_run("bags/lab03_mapping_run")
 for stamp, scan in scans:
@@ -406,7 +424,8 @@ managed node, and a configured but inactive map server publishes nothing.
 
 Commit and push, then submit:
 
-1. Your completed `occupancy.py` with all tests passing.
+1. Your completed `occupancy_skeleton.py` with all tests passing under
+   `ARC_OCCUPANCY=occupancy_skeleton`.
 2. Your map image, and the phantom ring image from Exercise 4.3.
 3. Your completed parameter table with the two written answers.
 4. Your exported `.pgm` and `.yaml`, loading correctly in RViz.
@@ -546,3 +565,17 @@ rosbag2 Python API: https://github.com/ros2/rosbag2
 `ros-navigation/navigation2`, package `nav2_costmap_2d`. The `StaticLayer` and
 `ObstacleLayer` sources are a production implementation of what you wrote today,
 including the marking and clearing behaviour that clamping makes possible.
+
+---
+
+## Further reading
+
+`docs/references.md` has a fuller list under **Lab 4. Occupancy grid mapping and
+classical path planning**, with papers, industry write-ups and the documentation
+worth keeping open. Every entry says what you get from it and which part of the
+lab it connects to.
+
+If you read one thing, read *Grid-Centric Traffic Scenario Perception for
+Autonomous Driving* (Shi and others, 2023). Its appendix sets out the binary
+Bayes filter and a worked inverse sensor model for a single LiDAR return, which
+is the log-odds update you implemented today.

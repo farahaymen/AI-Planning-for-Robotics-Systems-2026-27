@@ -178,15 +178,20 @@ log to be useful.
 course-check
 ```
 
-Note your graphics tier from the output. If you are in Tier B, launch headless
-and use RViz for visualisation. Every graded task today works in Tier B.
+Note your graphics tier from the output. The course VM ships with VirtualBox 3D
+acceleration off, so `course-check` reports Tier B and rendering goes through
+llvmpipe. Launch headless and use RViz for visualisation. Every graded task
+today works this way.
 
 ```
-# Tier A
-ros2 launch arc_gazebo simulation.launch.py world:=arc_warehouse
-# Tier B
 ros2 launch arc_gazebo simulation.launch.py world:=arc_warehouse headless:=true
 ```
+
+Do not turn 3D acceleration on to get a Gazebo window. With acceleration on, the
+sensor renderer runs against VirtualBox's SVGA3D driver, which advertises an
+OpenGL version it does not fully implement. The LiDAR then renders nothing and
+reports every beam at `range_min`, at the right rate, in the right frame, with
+no error in any log. `docs/vm_graphics_and_gpu_sensors.md` has the measurements.
 
 **[SCREENSHOT PLACEHOLDER]**
 The Gazebo Harmonic window with the robot spawned in the warehouse world, and the
@@ -208,13 +213,25 @@ Never build on a sensor you have not checked. Check all three.
 
 ```
 ros2 topic list
-ros2 topic hz /scan          # expect 10 Hz
-ros2 topic hz /odom          # expect 50 Hz
-ros2 topic hz /imu           # expect 100 Hz
-ros2 topic echo /scan --once | head -20
+ros2 topic hz /scan --window 50     # expect 10 Hz
+ros2 topic hz /odom --window 50     # expect 50 Hz
+ros2 topic hz /imu --window 50      # expect 100 Hz
+ros2 topic echo /scan --once --full-length
 ros2 topic info /scan --verbose
 ros2 run tf2_ros tf2_echo base_footprint laser_link
 ```
+
+Do not read the first number `ros2 topic hz` prints. It is a running average, and
+the first report covers the shortest window. It also arrives while nodes are
+still starting, so a busy moment is measured as a slow topic. On a machine where
+a settled measurement gives `/odom` at 49.7 Hz, the first report reads about
+33 Hz. Let each command run for several reports and record a later one.
+`--window 50` widens the sample each average is taken over.
+
+`--full-length` matters on `/scan`. Without it, `ros2 topic echo` prints the
+first 128 entries of `ranges` and replaces the rest with `'...'`. The scan has
+360 beams, so most of the data is hidden by default and a fault in the hidden
+beams does not appear.
 
 Fill this in:
 
@@ -317,9 +334,9 @@ Three world files each contain one fault. Diagnose each using the workflow rathe
 than by reading the file, then confirm by reading it.
 
 ```
-ros2 launch arc_gazebo simulation.launch.py world:=broken_a
-ros2 launch arc_gazebo simulation.launch.py world:=broken_b
-ros2 launch arc_gazebo simulation.launch.py world:=broken_c
+ros2 launch arc_gazebo simulation.launch.py world:=broken_a headless:=true
+ros2 launch arc_gazebo simulation.launch.py world:=broken_b headless:=true
+ros2 launch arc_gazebo simulation.launch.py world:=broken_c headless:=true
 ```
 
 | World | Symptom you observe | Command that revealed it | Root cause | Fix |
@@ -337,7 +354,9 @@ noise standard deviation raised by two orders of magnitude.
 One of these is deliberately subtle. The data arrives, at the right rate, in the
 right frame, and is wrong in a way you only see if you look at the values. That
 is the most realistic fault of the three, and it is the reason the workflow ends
-with `ros2 topic echo` rather than starting with it.
+with `ros2 topic echo --full-length` rather than starting with it. Keep
+`--full-length` on here. The fault may be in the 232 beams that echo hides by
+default.
 
 **[SCREENSHOT PLACEHOLDER]**
 RViz side by side comparison of the LaserScan display in a healthy world and in
@@ -424,6 +443,7 @@ Commit and push, then submit:
 Run the self check first:
 
 ```
+cd ~/arc_ws/src/arc-course
 pytest starters/lab03/tests -v
 ```
 
@@ -438,9 +458,10 @@ course-check
 echo $LIBGL_ALWAYS_SOFTWARE
 ```
 
-If `course-check` reports Tier B or C, use the headless launch argument. This is
-an infrastructure condition, not a mistake on your part, and it does not cost you
-marks. Record the incident ID.
+Tier B is the normal state on the course VM, and the headless launch in Stage 0
+is what to use. If `course-check` reports Tier C, the machine cannot run Gazebo
+at all. That is an infrastructure condition, not a mistake on your part, and it
+does not cost you marks. Record the incident ID.
 
 **A topic exists in Gazebo but not in ROS.**
 
@@ -531,3 +552,17 @@ reliable source of correct Harmonic syntax.
 Gazebo Harmonic community tutorials from the Open Robotics channel. Prefer
 material dated 2024 or later; anything older is likely to describe Gazebo Classic
 and will not work in this environment.
+
+---
+
+## Further reading
+
+`docs/references.md` has a fuller list under **Lab 3. Sensors and data
+validation**, with papers, industry write-ups and the documentation worth
+keeping open. Every entry says what you get from it and which part of the lab it
+connects to.
+
+If you read one thing, read *ROSMonitoring 2.0* (Ghaffari Saadat and others,
+FMAS 2024). It attaches automatic monitors to topics that check message content
+and ordering, which is the systematic version of the "publishing but wrong"
+diagnosis you did by hand today.

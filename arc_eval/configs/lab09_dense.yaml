@@ -1,0 +1,21 @@
+# Lab 9, Exercise 9.2. The dense_progress policy on the held-out seeds.
+#
+# Seeds 500 to 529 are never produced by the training run, which uses 0 upwards,
+# so this measures generalisation rather than recall. The env_args match the
+# training environment exactly apart from the seeds; if they did not, a drop in
+# score would tell you nothing about the policy.
+system_label: ppo_dense_progress
+scenario: training_grammar_seeds_500_529
+env_factory: arc_rl.nav_core:FastNavEnv
+env_args:
+  scenario_factory: arc_rl.arenas:training_scenario
+  reward: dense_progress
+  randomise_start: false
+policy_factory: starters.lab09.train:make_policy_from
+policy_args:
+  path: models/ppo_dense_progress
+seeds: [500, 501, 502, 503, 504, 505, 506, 507, 508, 509,
+        510, 511, 512, 513, 514, 515, 516, 517, 518, 519,
+        520, 521, 522, 523, 524, 525, 526, 527, 528, 529]
+max_steps: 900
+out: results/ppo_dense_progress.json

@@ -1,33 +1,19 @@
 """
-Coverage path planning: visit ALL of the free space, not a point in it.
+Coverage path planning: visit all of the free space, not a point in it.
 
-Everything else in this folder answers "how do I get from A to B". This answers
-a different question, and it is the question a large part of the robotics market
-actually asks. Vacuum cleaners, lawn mowers, floor scrubbers, agricultural
-sprayers, hull cleaners, inspection robots. None of them has a goal pose. They
-have an area and they have to cover it.
+Vacuum cleaners, lawn mowers, floor scrubbers and agricultural sprayers have no
+goal pose. They have an area to cover, which is a different problem with a
+different metric: coverage achieved and the number of turns it took.
 
-Treating this as a planning problem in its own right, rather than as a strange
-variant of A*, is the point. The objective is different, the failure modes are
-different, and the metric is different: not path length but **coverage achieved,
-and the number of turns it took**.
+Turns are the cost. A straight run happens at full speed with the tool at rated
+throughput; every turn means decelerate, rotate, accelerate, and often
+disengage the tool. Forty long passes finish sooner than 120 short ones at the
+same total distance.
 
-**Why turns are the cost.** On a straight run the robot moves at full speed and
-the brushes or blades work at their rated throughput. Every turn means
-decelerate, rotate, accelerate, and on most machines it also means lifting or
-disengaging the tool. A field covered in 40 long passes finishes sooner than the
-same field covered in 120 short ones even when the two paths are the same
-length. So a coverage planner that optimises distance is optimising the wrong
-thing, and you can see that in the numbers this module reports.
+Boustrophedon is Greek for "as the ox turns", up one furrow and back down the
+next. Nav2 ships a Coverage Server built on Fields2Cover.
 
-**Boustrophedon** is Greek for "as the ox turns": the way a field is ploughed,
-up one furrow and back down the next. It is the oldest path planning algorithm
-in the world and it is still what your robot vacuum does.
-
-Nav2 ships a Coverage Server built on Fields2Cover, so this has a production
-counterpart you can configure once you have written this one.
-
-REFERENCE IMPLEMENTATION. The version you fill in is `coverage_skeleton.py`.
+Reference implementation. The version you fill in is `coverage_skeleton.py`.
 """
 
 from __future__ import annotations
@@ -100,31 +86,20 @@ def boustrophedon(grid: np.ndarray, spacing: int, axis: int = 0,
                   connect: bool = True, tool_width: int | None = None) -> CoverageResult:
     """Plan a back-and-forth sweep over all reachable free space.
 
-    Three steps:
-
     1. Slice the map into stripes `spacing` cells apart.
-    2. In each stripe, find the free runs. Drive them left to right, then right
-       to left in the next stripe, which is what makes the turns short.
-    3. Join the end of one run to the start of the next. When they are adjacent
-       that is a straight hop; when an obstacle is in the way it is a real
-       planning problem, so we call the A* you wrote in Exercise 4.2.
+    2. In each stripe find the free runs, and drive them in alternating
+       direction so the turns stay short.
+    3. Join the end of one run to the start of the next with A*. A coverage
+       planner is a client of a point to point planner, which is also how
+       Nav2's coverage server works.
 
-    That last point is worth pausing on. A coverage planner is not a replacement
-    for a point to point planner, it is a CLIENT of one. The same is true in
-    production: Nav2's coverage server plans the sweep and hands the connecting
-    moves to the ordinary navigation stack.
+    `spacing` is how far apart the passes are driven. `tool_width` is how wide
+    the brush or blade is. They are different numbers, and passing the spacing
+    as the tool width makes every setting score 100 percent while the floor
+    stays dirty.
 
-    **`spacing` and `tool_width` are different things and conflating them hides
-    the central trade.** The spacing is how far apart you drive the passes. The
-    tool width is how wide the brush, blade or sensor actually is. Set the
-    spacing wider than the tool and you drive fewer, and you leave uncleaned
-    stripes between the passes. Set it narrower and you cover everything twice
-    and take much longer.
-
-    They default to being equal, which is the edge case where passes just touch.
-    Real machines overlap deliberately, by ten to twenty percent, because wheel
-    slip and localisation error mean passes that only just touch in the plan
-    will not touch on the floor.
+    They default to equal, the edge case where passes just touch. Real machines
+    overlap by ten to twenty percent to allow for slip and localisation error.
     """
     if tool_width is None:
         tool_width = spacing

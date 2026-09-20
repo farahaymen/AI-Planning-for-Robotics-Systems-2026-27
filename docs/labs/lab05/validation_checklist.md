@@ -46,7 +46,7 @@ release rather than discovering it during a session.
 V5.20 depends on the real time factor measured in Lab 3. If bag replay at 1x
 exceeds the slot, replay at 2x and confirm the scan matcher still converges.
 
-## Deliberate faults for Stage 1
+## Deliberate faults for the demonstrator
 
 | Fault | Expected symptom | Revealing command |
 |-------|------------------|-------------------|

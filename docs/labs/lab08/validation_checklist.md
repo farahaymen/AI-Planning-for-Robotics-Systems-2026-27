@@ -21,17 +21,20 @@ No simulator dependency. Must pass in Tier C.
 | V8.11 | Bug injection 3 (mean downsampling) erases a thin obstacle | | |
 | V8.12 | Bug injection 4 (raw goal angle) passes check_env but trains worse | | |
 | V8.13 | Bug injection 5 (path_length not reset) accumulates across episodes | | |
-| V8.14 | `pytest starters/lab08/tests` passes | | |
-| V8.15 | TODO markers in the starter match the tests exactly | | |
+| V8.14 | Reference passes the suite, 14 tests | `python3 -m pytest starters/lab08 -q` from `~/arc_ws/src/arc-course` | |
+| V8.15 | All 14 fail on the untouched skeleton, so no test passes by accident | `ARC_NAV_CORE=nav_core_skeleton python3 -m pytest starters/lab08 -q` | |
+| V8.16 | A correctly completed skeleton passes all 14 | fill it in from `arc_rl/nav_core.py` and re-run | |
+| V8.17 | TODO markers in the skeleton match the tests. 11 TODOs, 10 covered by at least one test; TODO 5, the domain randomisation branch, is NOT covered and the manual says so | re-check whenever either file changes | |
 
 ## Timing
 
 | ID | Stage | Target | Actual |
 |----|-------|--------|--------|
-| V8.16 | Exercise 8.1, implementation | 35 min | |
-| V8.17 | Exercise 8.2, four checks | 20 min | |
-| V8.18 | Exercise 8.3, five injections | 15 min | |
-| V8.19 | Whole session | 120 min | |
+| V8.18 | Exercise 8.1, implementation | 35 min | |
+| V8.19 | Exercise 8.2, four checks | 20 min | |
+| V8.20 | Exercise 8.3, five injections | 15 min | |
+| V8.21 | Exercise 8.4, reading `arc_eval/ros_nav2_env.py` | 10 min | |
+| V8.22 | Whole session | 120 min | |
 
 V8.7 records a defect found during development. Without it, a training run sees
 only as many arenas as there are parallel environments, because SB3 seeds each

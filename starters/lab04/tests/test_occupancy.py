@@ -1,20 +1,36 @@
-import math, sys; sys.path.insert(0, "starters/lab04")
-import numpy as np, pytest
-from occupancy import (MappingParams, OccupancyMap, bresenham, sensor_pose_from_base)
+"""
+Tests for Lab 4. The occupancy grid and its inverse sensor model.
+
+    python3 -m pytest starters/lab04 -q                              the reference
+    ARC_OCCUPANCY=occupancy_skeleton python3 -m pytest starters/lab04 -q   your own
+"""
+
+import importlib
+import math
+import os
+import sys
+from pathlib import Path
+
+import numpy as np
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+V = importlib.import_module(os.environ.get("ARC_OCCUPANCY", "occupancy"))
 
 
 def fresh(width=6.0, height=6.0, **kw):
-    return OccupancyMap(width, height, origin=(0.0, 0.0), params=MappingParams(**kw))
+    return V.OccupancyMap(width, height, origin=(0.0, 0.0), params=V.MappingParams(**kw))
 
 
 def test_bresenham_is_inclusive_at_both_ends():
-    cells = bresenham((0, 0), (0, 4))
+    cells = V.bresenham((0, 0), (0, 4))
     assert cells[0] == (0, 0) and cells[-1] == (0, 4) and len(cells) == 5
 
 
 def test_bresenham_handles_all_four_quadrants():
     for end in [(5, 3), (-5, 3), (5, -3), (-5, -3)]:
-        cells = bresenham((0, 0), end)
+        cells = V.bresenham((0, 0), end)
         assert cells[0] == (0, 0) and cells[-1] == end
 
 
@@ -85,8 +101,8 @@ def test_thresholds_produce_a_genuine_unknown_band():
 
 
 def test_sensor_offset_moves_the_origin_along_the_heading():
-    assert sensor_pose_from_base((0.0, 0.0, 0.0), 0.10) == pytest.approx((0.10, 0.0, 0.0))
-    p = sensor_pose_from_base((0.0, 0.0, math.pi / 2), 0.10)
+    assert V.sensor_pose_from_base((0.0, 0.0, 0.0), 0.10) == pytest.approx((0.10, 0.0, 0.0))
+    p = V.sensor_pose_from_base((0.0, 0.0, math.pi / 2), 0.10)
     assert p[0] == pytest.approx(0.0, abs=1e-9) and p[1] == pytest.approx(0.10)
 
 

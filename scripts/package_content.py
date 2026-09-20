@@ -678,7 +678,7 @@ if __name__ == "__main__":
 // it, and reading it is much easier once you have compiled something.
 //
 // Two changes to make:
-//   1. max_wheel_speed default 20.0 -> 16.5, the value the kinematics demanded.
+//   1. max_wheel_speed default 20.0 -> 16.3, the value the kinematics demanded.
 //   2. Change the subscribed topic, rebuild, then change it back.
 //
 // Notice the structure is the same as Code 1.1: a class deriving from Node, a

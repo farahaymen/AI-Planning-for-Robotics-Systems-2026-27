@@ -200,7 +200,7 @@ through each laboratory's validation checklist, in order, on this machine.
 
 | Laboratory | Checklist items | The item most likely to fail |
 |-----------|-----------------|------------------------------|
-| 1 | 15 | V1.17, first `colcon build` timing |
+| 1 | 15 | V1.18, first `colcon build` timing |
 | 2 | 18 | V2.23, two C++ builds inside the slot |
 | 3 | 22 | V3.25, recording time at the measured real time factor |
 | 4 | 15 | V4.15, full bag integration under 90 s |

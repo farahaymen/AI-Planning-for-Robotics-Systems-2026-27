@@ -18,8 +18,8 @@ Status codes: **PASS**, **FAIL**, **BLOCKED** (depends on a failed earlier item)
 | V6.1 | `course-check` exits 0 | `course-check; echo $?` | |
 | V6.2 | Graphics tier detected correctly | compare against `glxinfo -B` by hand | |
 | V6.3 | Simulation launches and the robot spawns | `ros2 launch arc_gazebo simulation.launch.py` | |
-| V6.4 | `/scan` publishes at 10 Hz +/- 1 | `ros2 topic hz /scan` | |
-| V6.5 | `/odom` publishes at 50 Hz +/- 5 | `ros2 topic hz /odom` | |
+| V6.4 | `/scan` publishes at 10 Hz +/- 1 | `ros2 topic hz /scan --window 50`, read a settled report | |
+| V6.5 | `/odom` publishes at 50 Hz +/- 5 | `ros2 topic hz /odom --window 50`, read a settled report | |
 | V6.6 | TF resolves `map` to `base_footprint` | `ros2 run tf2_ros tf2_echo map base_footprint` | |
 | V6.7 | No duplicate TF publishers | `ros2 run tf2_tools view_frames` | |
 
@@ -29,7 +29,7 @@ Status codes: **PASS**, **FAIL**, **BLOCKED** (depends on a failed earlier item)
 |----|-------|-----|--------|
 | V6.8 | All lifecycle nodes reach `active` within 30 s | `ros2 lifecycle get /bt_navigator` and each server | |
 | V6.9 | `navigate_to_pose` action is advertised | `ros2 action info /navigate_to_pose -t` | |
-| V6.10 | `goal_client.py` reaches a goal and exits 0 | `ros2 run arc_nav goal_client 4.5 2.0` | |
+| V6.10 | `goal_client.py` reaches a goal and exits 0 | `python3 ~/arc_ws/goal_client.py 4.5 2.0; echo $?` | |
 | V6.11 | World reset hook returns the robot to a known pose | `Nav2EvalEnv._reset_world`, currently NotImplemented | |
 | V6.12 | Ten seeded runs complete without manual intervention | `python3 -m arc_eval.runner --config arc_eval/configs/lab06_dwb.yaml` | |
 | V6.13 | Metrics JSON contains every required info key | inspect `results/lab06_dwb.json` | |
@@ -40,12 +40,14 @@ Status codes: **PASS**, **FAIL**, **BLOCKED** (depends on a failed earlier item)
 |----|-------|-----|--------|
 | V6.14 | Costmap subscriber receives a message with transient local QoS | Code 6.2 as printed | |
 | V6.15 | Costmap subscriber receives nothing with default QoS | deliberately break it; the manual claims this | |
-| V6.16 | `pytest starters/lab06/tests` passes, 7 tests (includes the shape check) | | |
+| V6.16 | `python3 -m pytest starters/lab06 -q` passes, 7 collected (6 run, the Nav2 adapter test is skipped without `ARC_INTEGRATION=1`) | from `~/arc_ws/src/arc-course` | |
+| V6.16a | The skeleton fails the same suite before it is filled in, and passes after | `ARC_GRID_TOOLS=grid_tools_skeleton python3 -m pytest starters/lab06 -q` | |
 | V6.17 | Student A* on the raw map hugs walls; on the costmap it does not | visual check in RViz | |
 | V6.18 | `use_astar: true` changes the NavFn path measurably | compare `/plan` lengths | |
-| V6.19 | Inflation radius 0.90 blocks the narrow doorway | the manual asserts this; confirm the doorway width supports it | |
-| V6.20 | Inflation radius 0.25 succeeds where 0.90 fails | | |
-| V6.21 | MPPI config loads and the controller runs at the configured rate | `ros2 topic hz /cmd_vel_smoothed` | |
+| V6.19 | NavFn still finds a path through the 1.2 m doorway at `global_costmap` inflation radius 0.90 | the manual asserts this; lethal cost is written only to `robot_radius` 0.22 | |
+| V6.20 | Path length and minimum clearance both rise measurably from radius 0.25 to 0.90 | measure `/plan`; this is what Experiment 6.3 asks students to see | |
+| V6.20a | The student A* at `occupied_threshold=65` does fail at radius 0.90 and succeed at 0.25 | Code 6.3 against each costmap | |
+| V6.21 | MPPI config loads and the controller runs at the configured rate | `ros2 topic hz /cmd_vel_smoothed --window 50`, read a settled report | |
 | V6.22 | MPPI runs in real time on the weakest PC with `batch_size: 1000` | measure controller frequency under load | |
 
 ## Timing
@@ -74,7 +76,7 @@ troubleshooting section, and each must be recoverable within five minutes.
 |-------|-------------|------------------|-------------------|
 | Wrong `sensor_frame` in the obstacle layer | edit `nav2_dwb.yaml` | costmap ignores the LiDAR | `ros2 run tf2_ros tf2_echo` |
 | `controller_server` left inactive | remove from lifecycle manager list | path plans, robot still | `ros2 lifecycle get` |
-| Collision monitor polygon radius set to 1.5 m | edit `nav2_dwb.yaml` | robot refuses to move at all | `ros2 topic hz /cmd_vel` |
+| Collision monitor polygon radius set to 1.5 m | edit `nav2_dwb.yaml` | robot refuses to move at all | `ros2 topic hz /cmd_vel --window 50` |
 | `wheel_radius` in the controller set to 0.055 | edit `arc_bot_controllers.yaml` | odometry drifts, AMCL diverges | compare `/odom` with ground truth |
 | Costmap subscriber QoS set to volatile | edit the starter | subscription exists, never fires | `ros2 topic info --verbose` |
 

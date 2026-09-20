@@ -1,7 +1,13 @@
 """Bring up the simulation and Nav2, then apply one scenario fault.
 
     ros2 launch arc_lab7 difficult_robot.launch.py scenario:=1
+    ros2 launch arc_lab7 difficult_robot.launch.py scenario:=1 map:=/path/to/other.yaml
+
+The map defaults to the one you saved in Lab 5. Pass map:= to use a different
+one.
 """
+
+import os
 
 from launch import LaunchDescription
 from launch.actions import (DeclareLaunchArgument, ExecuteProcess,
@@ -15,7 +21,12 @@ def generate_launch_description():
     scenario = LaunchConfiguration("scenario")
     return LaunchDescription([
         DeclareLaunchArgument("scenario", default_value="1"),
-        DeclareLaunchArgument("map"),
+        # Without a default this aborts with a missing-argument error, which is
+        # a poor first experience of a lab about diagnosing failures.
+        DeclareLaunchArgument(
+            "map",
+            default_value=os.path.join(
+                os.path.expanduser("~"), "arc_ws", "maps", "slam_map.yaml")),
         DeclareLaunchArgument("headless", default_value="false"),
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(PathJoinSubstitution(

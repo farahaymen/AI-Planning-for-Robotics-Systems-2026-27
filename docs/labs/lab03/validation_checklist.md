@@ -9,7 +9,7 @@ optional. Every exercise must complete headless.
 
 | ID | Check | How | Status |
 |----|-------|-----|--------|
-| V3.1 | Simulation launches in Tier A | | |
+| V3.1 | `course-check` reports Tier B with 3D acceleration off, as shipped | `course-check` | |
 | V3.2 | Simulation launches headless in Tier B | `headless:=true` | |
 | V3.3 | Robot spawns at the expected pose | | |
 | V3.4 | `/scan` at 10 Hz +/- 1, `frame_id` is `laser_link` | | |

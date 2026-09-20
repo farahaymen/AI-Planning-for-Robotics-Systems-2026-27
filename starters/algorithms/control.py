@@ -1,31 +1,16 @@
 """
-Two controllers: PID heading control, and Pure Pursuit.
+Two path followers: PID heading control and Pure Pursuit.
 
-A planner hands you a list of points. Something has to turn that into wheel
-velocities, and that something is a controller. Without one there is no
-autonomous robot, only a drawing of where a robot might go.
+A planner returns a list of points. A controller turns those points into wheel
+velocities.
 
-These are the two you need, and they represent the two families almost every
-production path follower belongs to.
+PID is an error controller: measure how wrong you are, multiply by gains, drive
+the error to zero. Pure Pursuit is geometric: pick a point on the path ahead of
+the robot, work out the arc that reaches it, drive that arc.
 
-**PID** is an ERROR controller. Measure how wrong you are, multiply by a gain,
-drive the error to zero. It knows nothing about the path; it only knows the
-number you hand it. Every process controller in every factory is some version
-of this.
+Nav2 ships Regulated Pure Pursuit, which is this with speed limits added.
 
-**Pure Pursuit** is a GEOMETRIC controller. It does not compute an error at all.
-It picks a point on the path ahead of the robot and works out the arc that
-reaches it, then drives that arc. Aim at where you want to be, not at how wrong
-you are.
-
-The difference matters more than it sounds. Ask a PID controller to follow a
-path and you must first invent an error signal, and every reasonable choice of
-error has a failure mode. Pure Pursuit sidesteps the question. It is why
-Nav2's Regulated Pure Pursuit exists and why it targets service and industrial
-robots specifically: it is predictable, it has one parameter people can reason
-about, and it does not oscillate.
-
-REFERENCE IMPLEMENTATION. The version you fill in is `control_skeleton.py`.
+Reference implementation. The version you fill in is `control_skeleton.py`.
 """
 
 from __future__ import annotations
@@ -48,33 +33,16 @@ class PID:
 
     output = kp * e + ki * integral(e) + kd * de/dt
 
-    What each term is for, in one line each:
+    kp reacts to how wrong you are. ki removes steady state error left by a
+    constant disturbance. kd damps, and amplifies sensor noise, which is why
+    many working controllers leave kd at zero.
 
-    **kp** is the workhorse. It reacts in proportion to how wrong you are. Too
-    small and the robot converges slowly; too large and it overshoots and
-    oscillates. Almost all of the useful behaviour comes from this term.
+    `integral_limit` is anti-windup. A robot held against a wall accumulates
+    integral the whole time it is stuck, then spins hard working it off once it
+    comes free.
 
-    **ki** removes steady state error. If a constant disturbance, say a floor
-    that slopes, leaves you permanently half a degree off, the proportional term
-    settles at that half degree forever because half a degree times kp is
-    exactly the effort needed to hold it there. The integral accumulates that
-    residual until it is driven out.
-
-    **kd** damps. It reacts to how fast the error is changing, which lets you
-    raise kp without oscillating. It also amplifies sensor noise, which is why
-    many working controllers are PI with kd left at zero.
-
-    Two details here are not decoration.
-
-    `integral_limit` is anti-windup. Without it, a robot blocked against a wall
-    accumulates integral for as long as it is stuck, and when it finally comes
-    free it spins wildly working off an integral term built up over ten seconds.
-    Every real PID implementation clamps this, and every teaching example that
-    omits it produces exactly that bug.
-
-    `wrap` is for angles. A heading error is a circular quantity, so the
-    difference between 179 and -179 degrees is two degrees, not 358. Set
-    `wrap=True` for any angular error and the class folds it for you.
+    Set `wrap=True` for an angular error, so 179 to -179 degrees is a difference
+    of two degrees rather than 358.
     """
 
     kp: float
@@ -182,27 +150,20 @@ def make_pure_pursuit(lookahead: float = 0.45, speed: float = 0.35,
                       regulate: bool = True, min_speed: float = 0.08):
     """Pure Pursuit: steer along the arc that reaches a point ahead on the path.
 
-    The whole algorithm, once the lookahead point is in the robot's frame at
-    (x, y) and the lookahead distance is L:
+    With the lookahead point at (x, y) in the robot's frame and lookahead
+    distance L:
 
         curvature = 2 * y / L^2
         w         = v * curvature
 
-    That is it. The derivation is a circle through the origin, tangent to the
-    robot's current heading, passing through the lookahead point; its curvature
-    is 2y over L squared. No error signal, no gains, one parameter.
+    That comes from the circle through the origin, tangent to the current
+    heading, passing through the lookahead point. No error signal and no gains.
 
-    **The lookahead distance is the whole controller.** Short and the robot
-    tracks the path tightly and oscillates, because it is always correcting for
-    a point it is about to reach. Long and it cuts corners smoothly, because it
-    is aiming past them. Figure `fig_lookahead.png` shows the same path driven
-    at three values and the trade is obvious in one glance.
+    Lookahead distance is the only parameter. Short tracks tightly and
+    oscillates, long cuts corners smoothly. See `fig_lookahead.png`.
 
-    `regulate` adds what Nav2's Regulated Pure Pursuit adds: slow down when the
-    curvature is high. Without it, a robot takes a hairpin at full speed, and
-    on a real floor with real tyres it slides. With it, speed falls as the turn
-    tightens. One line, and it is the difference between a demonstration and
-    something you would let run near people.
+    `regulate` slows down as curvature rises, which is what Nav2's Regulated
+    Pure Pursuit adds. Without it the robot takes hairpins at full speed.
     """
 
     def controller(pose: Pose, path: np.ndarray, index: int = 0):
@@ -234,41 +195,21 @@ def follow_path(path: np.ndarray, pose: Pose, controller=None,
                 pose_noise: float = 0.0, seed: int = 0):
     """Drive a whole path and return the trajectory, for testing and figures.
 
-    Stops when the robot is within `goal_tolerance` of the final waypoint, or
-    when it runs out of steps. Returning the reason rather than just the
-    trajectory means a test can assert "it arrived" instead of "it moved".
+    Stops within `goal_tolerance` of the final waypoint, or when steps run out,
+    and returns the reason so a test can assert that it arrived.
 
-    `pose_noise` is the important argument and the reason this function exists
-    rather than a bare loop. A real controller acts on an ESTIMATED pose, and
-    that estimate is noisy. This lets you model that.
-
-    Measure two things, not one, and the reason becomes clear. Measured on the
-    corner path, mean of fifteen seeds:
+    `pose_noise` models a noisy pose estimate, which is what a real controller
+    acts on. Measured on the corner path, mean of fifteen seeds at 5 cm noise:
 
         lookahead    cross track error    control jitter
-                        5 cm noise          5 cm noise
           0.10 m          0.017 m              0.46
           0.20 m          0.020 m              0.20
           0.45 m          0.035 m              0.11
           1.00 m          0.076 m              0.08
 
-    Tracking error says shorter is better, always, and it keeps saying that no
-    matter how much noise you add. If that is the only number you look at, you
-    will choose the smallest lookahead that runs.
-
-    Control jitter, how violently the commanded turn rate changes from one cycle
-    to the next, says the opposite, and the gap is nearly six to one. That is
-    the number that corresponds to a robot juddering down a corridor, wearing
-    out gearboxes and making people step back from it.
-
-    So the trade is not accuracy against accuracy. It is **accuracy against
-    smoothness**, and which one you optimise is an engineering decision about
-    the application, not something the data decides for you. A floor scrubber
-    wants smooth. A robot threading a narrow gap wants accurate.
-
-    This is also a lesson about measurement itself: a single metric chose the
-    wrong answer confidently. It is the same argument the seeded evaluation in
-    `arc_eval` makes, arriving three weeks earlier.
+    Tracking error picks the shortest lookahead. Control jitter picks the
+    longest, by nearly six to one. The trade is accuracy against smoothness,
+    and which one to favour depends on the application.
     """
     from motion import step as motion_step
 

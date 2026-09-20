@@ -15,7 +15,7 @@ date: "Duration 2 hours | ARC VM 2026.1"
 **Prerequisites**
 
 Lab 4, including your working occupancy map and the bag it was built from.
-`starters/lab05/particle_filter.py` should be read before the session.
+`starters/lab05/particle_filter_skeleton.py` should be read before the session.
 
 ---
 
@@ -90,8 +90,12 @@ not competitors; they sit at different levels.
 
 ### Monte Carlo localisation in three steps
 
-Read `starters/lab05/particle_filter.py` before the session. It is about 120
-lines and implements exactly the three steps below.
+Read `starters/lab05/particle_filter_skeleton.py` before the session. It is the
+file you edit. `predict`, `update_weights` and `resample` are removed and what
+belongs in them is marked with nine TODOs, which implement exactly the three
+steps below. `starters/lab05/particle_filter.py` is the reference
+implementation, 187 lines. Leave it closed until your own tests pass, then read
+it and compare.
 
 **Predict.** Each particle is moved by the odometry increment plus noise sampled
 from the motion model. The noise is what matters. Without it, every particle
@@ -223,7 +227,7 @@ constrains.
 course-check
 ```
 
-### Stage 1: measure the drift (15 minutes)
+### Exercise 5.1: measure the drift (15 minutes)
 
 Before fixing something, measure it. Gazebo can publish ground truth, which the
 robot does not have access to but you do.
@@ -255,14 +259,27 @@ visible gap between the two paths, is the shot that matters.*
 
 ### Exercise 5.2: watch a particle filter converge (20 minutes)
 
-Run the supplied filter against your Lab 4 map, offline, so you can watch the
-mechanism rather than fight the simulator.
+Complete `particle_filter_skeleton.py` and run it against your Lab 4 map,
+offline, so you can watch the mechanism rather than fight the simulator. Fill in
+the nine TODOs in `predict`, `update_weights` and `resample`, and run the tests
+as you go. The `ARC_PARTICLE_FILTER` variable is what points the tests at your
+file rather than at the reference:
+
+```
+cd ~/arc_ws/src/arc-course
+ARC_PARTICLE_FILTER=particle_filter_skeleton python3 -m pytest starters/lab05 -q
+```
+
+Without that variable the tests import `particle_filter.py`, the reference
+implementation, and they all pass without you having written anything. Once your
+own version passes, read `particle_filter.py` and compare it against what you
+wrote.
 
 **Code 5.1: Global localisation from a uniform prior**
 
 ```python
 import numpy as np
-from particle_filter import ParticleFilter, odometry_increment
+from particle_filter_skeleton import ParticleFilter, odometry_increment
 from likelihood_field import LikelihoodField        # supplied
 
 field = LikelihoodField.from_map("my_map.yaml", sigma=0.2)
@@ -323,7 +340,7 @@ Lab 4 map is fair.
 
 ```
 ros2 launch arc_lab5 slam_from_bag.launch.py bag:=~/arc_ws/bags/lab03_mapping_run
-rviz2 -d $(ros2 pkg prefix arc_lab5)/share/arc_lab5/rviz/slam.rviz
+rviz2 -d $(ros2 pkg prefix arc_nav)/share/arc_nav/rviz/slam.rviz
 ```
 
 Watch the pose graph build in RViz. When the robot returns to a previously
@@ -395,11 +412,13 @@ need to be able to explain why it does not.
 Commit and push, then submit:
 
 1. Your drift measurement table.
-2. Your particle filter convergence table, including the failed no-noise case,
+2. Your completed `particle_filter_skeleton.py` with all tests passing under
+   `ARC_PARTICLE_FILTER=particle_filter_skeleton`.
+3. Your particle filter convergence table, including the failed no-noise case,
    and the step and location at which the 2000 particle run converged.
-3. Your saved SLAM map, and the comparison table against your Lab 4 map.
-4. Your AMCL versus odometry table.
-5. Two sentences on the kidnapped robot: what you observed and why.
+4. Your saved SLAM map, and the comparison table against your Lab 4 map.
+5. Your AMCL versus odometry table.
+6. Two sentences on the kidnapped robot: what you observed and why.
 
 ---
 
@@ -511,3 +530,16 @@ Cyrill Stachniss, Mobile Sensing and Robotics lecture series, University of Bonn
 on YouTube. The lectures on particle filters and on graph based SLAM are the best
 freely available treatment of this material and follow the same notation as
 *Probabilistic Robotics*.
+
+---
+
+## Further reading
+
+`docs/references.md` has a fuller list under **Lab 5. SLAM and localisation**,
+with papers, industry write-ups and the documentation worth keeping open. Every
+entry says what you get from it and which part of the lab it connects to.
+
+If you read one thing, read *Autonomous Navigation with LeKiwi and Nav2*
+(Kamath, Foxglove, 2026). It maps a real robot with slam_toolbox and then
+localises it two ways, slam_toolbox localization against AMCL, which is exactly
+the comparison Exercise 5.4 asks you to make.

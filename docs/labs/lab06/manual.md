@@ -284,7 +284,7 @@ Then bring up the simulator and the navigation stack:
 
 ```
 ros2 launch arc_gazebo simulation.launch.py world:=arc_warehouse
-ros2 launch arc_nav navigation.launch.py map:=$HOME/arc_ws/maps/lab05_map.yaml params:=dwb
+ros2 launch arc_nav navigation.launch.py map:=$HOME/arc_ws/maps/slam_map.yaml params:=dwb
 ```
 
 **[SCREENSHOT PLACEHOLDER]**
@@ -311,7 +311,11 @@ You can set a goal by clicking in RViz, and you should do that once to confirm
 the stack works. But clicking is not an interface you can benchmark, script or
 build a mission on, so the rest of the course sends goals through the action.
 
-Create the file below in `~/arc_ws/src/arc_nav/arc_nav/goal_client.py`.
+Save the file below as `~/arc_ws/goal_client.py`. `arc_nav` is an `ament_cmake`
+package that installs configuration, launch files and maps but declares no
+Python entry points, so there is no `ros2 run arc_nav goal_client` to reach.
+Running the script directly with `python3` needs no build step and behaves
+identically: `ros2 run` only ever locates an executable for you.
 
 **Code 6.1: Sending a navigation goal through the NavigateToPose action**
 
@@ -400,10 +404,10 @@ metrics the evaluation harness records.
 The exit code matters because it makes the script usable from a test or a
 benchmark rather than only from a terminal.
 
-Run it:
+Run it, with ROS 2 sourced in the same terminal:
 
 ```
-ros2 run arc_nav goal_client 4.5 2.0
+python3 ~/arc_ws/goal_client.py 4.5 2.0
 ```
 
 **[GIF PLACEHOLDER]**
@@ -420,17 +424,46 @@ true selects the A* variant. You have written both. Now compare them on the same
 map.
 
 The costmap is published as a `nav_msgs/OccupancyGrid` on
-`/global_costmap/costmap`, and `starters/lab06/grid_tools.py` gives you the
-conversion.
+`/global_costmap/costmap`. `starters/lab06/grid_tools.py` is the conversion,
+and `starters/lab06/grid_tools_skeleton.py` is the version you complete.
 
-**Code 6.2: Converting the published global costmap into a NumPy grid**
+It has seven TODOs across `to_binary_obstacle_map`, `inflate` and
+`path_length_m`. The dataclass,
+`occupancy_to_numpy` and the two coordinate conversions are given and the tests
+depend on them staying that way. Do this before you touch the robot, because a
+transposed grid or a wrapped inflation disc is far easier to find in a test than
+in RViz.
+
+```
+cd ~/arc_ws/src/arc-course
+ARC_GRID_TOOLS=grid_tools_skeleton python3 -m pytest starters/lab06 -q
+```
+
+Run it without the variable to check the same tests against the reference
+implementation:
+
+```
+python3 -m pytest starters/lab06 -q
+```
+
+Save the next listing as `~/arc_ws/costmap_io.py`. Code 6.3 imports
+`fetch_costmap` from it, so it has to be a real file rather than something you
+paste into a shell.
+
+**Code 6.2: `~/arc_ws/costmap_io.py`, converting the published global costmap into a NumPy grid**
 
 ```python
+import sys
+from pathlib import Path
+
 import numpy as np
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSDurabilityPolicy, QoSProfile, QoSReliabilityPolicy
 from nav_msgs.msg import OccupancyGrid
+
+# grid_tools lives in the course checkout, which is not on the default path.
+sys.path.insert(0, str(Path.home() / "arc_ws/src/arc-course/starters/lab06"))
 
 from grid_tools import occupancy_to_numpy, to_binary_obstacle_map, world_to_grid
 
@@ -481,29 +514,60 @@ reports a publisher, and never fires its callback.
 
 Now plan on it with your own implementation.
 
+Save this one as `~/arc_ws/plan_on_costmap.py`, next to `costmap_io.py`.
+
 **Code 6.3: Planning with your A* and comparing against Nav2's path**
 
 ```python
-import numpy as np
-from grid_tools import (fetch_costmap, to_binary_obstacle_map, inflate,
-                        world_to_grid, grid_to_world, path_length_m)
-from my_planner import astar          # your planning notebook implementation
+import sys
+from pathlib import Path
 
+import numpy as np
+import rclpy
+
+COURSE = Path.home() / "arc_ws/src/arc-course/starters"
+sys.path.insert(0, str(COURSE / "lab06"))        # grid_tools
+sys.path.insert(0, str(COURSE / "algorithms"))   # planners, and the gridmap it imports
+
+from costmap_io import fetch_costmap            # Code 6.2, saved next to this file
+from grid_tools import (to_binary_obstacle_map, inflate,
+                        world_to_grid, grid_to_world, path_length_m)
+from planners import astar                      # the planning notebook A*, reference version
+
+rclpy.init()
 grid, info = fetch_costmap()
 
 # Nav2 has already inflated this costmap, so values above the threshold include
 # both real obstacles and the inflated region around them. Planning on the
 # inflated map is what makes a point based planner safe for a robot with size.
-obstacles = to_binary_obstacle_map(grid, occupied_threshold=253,
+#
+# The costmap is rescaled to 0 to 100 on the way out: lethal becomes 100, the
+# inscribed ring becomes 99, unknown becomes -1, and the inflated gradient is
+# squeezed into 1 to 98. The 253 you may have read about is the internal scale
+# and never appears on the topic, so a threshold of 253 matches nothing and your
+# A* plans straight through walls. 65 is the default in grid_tools and keeps
+# most of the inflated band.
+obstacles = to_binary_obstacle_map(grid, occupied_threshold=65,
                                    unknown_is_obstacle=False)
 
 start = world_to_grid(0.0, 0.0, info)
 goal = world_to_grid(4.5, 2.0, info)
 
-path, expanded = astar(obstacles, start, goal)
-print(f"A*: {len(path)} cells, {expanded} nodes expanded, "
-      f"{path_length_m(path, info):.2f} m")
+# astar returns a PlanResult, not a tuple. Check `found` before trusting `path`:
+# an empty path and a failed search are different outcomes.
+result = astar(obstacles, start, goal)
+if not result.found:
+    raise SystemExit("no path; is the goal inside inflated space?")
+print(f"A*: {len(result.path)} cells, {result.expanded} nodes expanded, "
+      f"{path_length_m(result.path, info):.2f} m")
+
+rclpy.shutdown()
 ```
+
+Once you have completed `planners_skeleton.py`, change that import to
+`from planners_skeleton import astar` and run it again. The numbers should
+match. If they do not, the tests in `starters/algorithms/tests` will tell you
+where faster than the robot will.
 
 Compare three numbers against the path Nav2 produced for the same goal, which you
 can measure by echoing `/plan`:
@@ -530,20 +594,51 @@ walls should be clearly visible, so choose a goal that requires a corner.*
 
 ### Experiment 6.3: what the inflation radius actually does (15 minutes)
 
-Change `inflation_radius` in `arc_nav/config/nav2_dwb.yaml` and re-run the same
-goal three times, once at each value.
+`arc_nav/config/nav2_dwb.yaml` sets `inflation_radius` twice, once under
+`local_costmap` and once under `global_costmap`. They do different jobs. The
+local one shapes the costmap the controller samples against, so it changes how
+closely the robot is willing to pass an obstacle it can see right now. The
+global one shapes the map the planner searches, so it changes the route. This
+experiment is about the route, so change the value under **`global_costmap`**
+and leave the local one at 0.55.
 
-| `inflation_radius` | Path length (m) | Minimum clearance (m) | Navigation time (s) | Path found? |
-|--------------------|-----------------|------------------------|---------------------|-------------|
-| 0.25 | | | | |
-| 0.55 | | | | |
-| 0.90 | | | | |
+Re-run the same goal three times, once at each value, and measure the global
+plan on `/plan`.
 
-Then answer two questions in your exit task. At which value does the robot stop
-being able to plan through the narrow doorway, and why does that happen at a
-radius smaller than the doorway width? What would you set for a robot delivering
-medication in a hospital corridor, and what would you set for a robot moving
-pallets in a warehouse aisle at night, and why are those answers different?
+| `global_costmap` `inflation_radius` | Path length (m) | Minimum clearance (m) | Navigation time (s) |
+|-------------------------------------|-----------------|------------------------|---------------------|
+| 0.25 | | | |
+| 0.55 | | | |
+| 0.90 | | | |
+
+NavFn will find a path at all three. That is not the experiment failing, and it
+is the first thing to understand here. Inflation writes *lethal* cost only out
+to the inscribed radius, which is `robot_radius`, 0.22 m. Beyond that it writes
+a decaying cost, and NavFn treats only the lethal value 254 as blocked. So
+raising `inflation_radius` to 0.90 makes the doorway expensive, not closed, and
+the planner still goes through it. What moves is the clearance and the length:
+the route is pushed towards the centre of free space and gets longer.
+
+Now do the same three costmaps through your own planner. Re-run Code 6.3 at each
+radius, with `occupied_threshold=65` as printed.
+
+| `global_costmap` `inflation_radius` | Your A* path found? | Your A* length (m) |
+|-------------------------------------|---------------------|---------------------|
+| 0.25 | | |
+| 0.55 | | |
+| 0.90 | | |
+
+Your A* does close the doorway, because a threshold of 65 treats the inflated
+band as solid rather than as expensive. The map and the geometry are the same in
+both cases. The only difference is where the line was drawn between cost and
+obstacle.
+
+Then answer two questions in your exit task. Nav2 and your A* disagree about
+whether the 1.2 m doorway is passable at `inflation_radius: 0.90`; explain which
+one is right for a robot of radius 0.22 m, and what you would have to change in
+the other to make it agree. What would you set for a robot delivering medication
+in a hospital corridor, and what would you set for a robot moving pallets in a
+warehouse aisle at night, and why are those answers different?
 
 ### Exercise 6.4: a seeded controller comparison (20 minutes)
 
@@ -562,7 +657,7 @@ system_label: nav2_dwb
 scenario: lab05_map_missions
 env_factory: arc_eval.ros_nav2_env:make_nav2_env
 env_args:
-  goals: [[4.5, 2.0, 0.0], [1.0, 5.5, 1.57], [-2.0, 3.0, 3.14]]
+  goals: [[4.5, 2.0, 0.0], [1.0, 5.5, 1.57], [8.0, 6.0, 0.0]]
   system_label: nav2_dwb
   time_limit_s: 120.0
 policy_factory: arc_eval.ros_nav2_env:make_nav2_policy
@@ -570,6 +665,15 @@ seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
 max_steps: 4000
 out: results/lab06_dwb.json
 ```
+
+The goals are in the `map` frame, whose origin is the spawn pose at world
+(1, 1), so the mapped arena runs from about -1 to 11 on both axes. The first two
+goals stay in the western half. The third, at map (8.0, 6.0), is world (9.0,
+7.0) in the eastern half, which means every run has to pass through the 1.2 m
+partition doorway. That is the part of the mission where the two controllers
+differ, so a benchmark that never crosses it is not measuring much. The point is
+at least 2 m clear of the partition, the east wall and both eastern pillars, so
+it is reachable on every seed.
 
 ```
 python3 -m arc_eval.runner --config arc_eval/configs/lab06_dwb.yaml
@@ -647,10 +751,16 @@ Follow the velocity chain. Nav2 publishes to `cmd_vel_smoothed`, the collision
 monitor forwards it to `cmd_vel`, and the controller consumes that.
 
 ```
-ros2 topic hz /cmd_vel_smoothed
-ros2 topic hz /cmd_vel
+ros2 topic hz /cmd_vel_smoothed --window 50
+ros2 topic hz /cmd_vel --window 50
 ros2 control list_controllers
 ```
+
+`ros2 topic hz` prints a running average and its first line is the least
+trustworthy one: it covers the shortest window and it lands while processes are
+still starting, so a busy moment reads as a slow topic. On a machine where a
+settled measurement gives 49.7 Hz the first line has been seen to report 33 Hz.
+Let it run for ten seconds or so and read the last report, not the first.
 
 If `cmd_vel_smoothed` is publishing and `cmd_vel` is not, the collision monitor
 is stopping you, which means it believes something is inside its stop polygon.
@@ -660,7 +770,7 @@ active.
 **The costmap is empty or the robot sees nothing.**
 
 ```
-ros2 topic hz /scan
+ros2 topic hz /scan --window 50
 ros2 topic info /scan --verbose
 ros2 run tf2_ros tf2_echo base_footprint laser_link
 ```
@@ -779,3 +889,14 @@ Macenski, S. Nav2 design and architecture, ROSCon FR 2023. Motivates the Nav2
 architecture from ROS 2 and mobile robotics design principles, and covers in
 thirty minutes what would otherwise take a long time to assemble from
 documentation.
+
+## Further reading
+
+`docs/references.md` has a fuller list under **Lab 6. The Nav2 navigation
+stack**, with the papers, the industry write-ups and the Nav2 documentation
+pages separated. If you read one thing from it, make it the Macenski et al.
+2023 survey: it covers every planner and controller in this lab, including the
+ones you did not run, and it is written by the people who maintain them. The
+**Lessons Learned from The 2nd BARN Challenge** paper in the same section is the
+honest companion to Exercise 6.4, because it reports how much on-site tuning a
+head-to-head navigation comparison still needed.

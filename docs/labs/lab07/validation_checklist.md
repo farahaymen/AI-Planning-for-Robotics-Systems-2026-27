@@ -8,7 +8,7 @@ Requires Nav2 and the simulator. Must pass in Tier B.
 
 | ID | Check | How | Status |
 |----|-------|-----|--------|
-| V7.1 | Default BT XML path resolves and the file is readable | `ros2 param get /bt_navigator` | |
+| V7.1 | Default BT XML path resolves and the file is readable | `ros2 param get /bt_navigator default_nav_to_pose_bt_xml` | |
 | V7.2 | `/behavior_tree_log` publishes while a goal is active | | |
 | V7.3 | `arc_recovery.xml` parses and loads after a lifecycle cycle | | |
 | V7.4 | Setting the param WITHOUT cycling has no effect | the manual claims this | |
@@ -19,7 +19,7 @@ Requires Nav2 and the simulator. Must pass in Tier B.
 | V7.9 | Scenario 3 reproduces its documented symptom | | |
 | V7.10 | Each fault is diagnosable from `/behavior_tree_log` plus the workflow | | |
 | V7.11 | Progress-checker fault genuinely aborts a legitimate spin | subtle, verify | |
-| V7.12 | `slowdown` polygon measurably reduces `/cmd_vel` below `/cmd_vel_smoothed` | | |
+| V7.12 | `PolygonSlow`, added by the student in Exercise 7.4, measurably reduces `/cmd_vel` below `/cmd_vel_smoothed`. The shipped config declares only `PolygonStop` | apply the Exercise 7.4 edit first | |
 | V7.13 | `stop` polygon zeroes `/cmd_vel` while Nav2 still commands motion | | |
 | V7.14 | `/collision_monitor_state` reflects the active polygon | | |
 | V7.15 | `pytest starters/lab07/tests` passes, 12 tests | | |

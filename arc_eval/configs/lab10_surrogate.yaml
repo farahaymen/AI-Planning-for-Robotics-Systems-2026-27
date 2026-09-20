@@ -1,0 +1,24 @@
+# Lab 10, Exercise 10.1. The surrogate half of the simulation gap measurement.
+#
+# Deliberately identical to lab09_dense.yaml apart from the label and the output
+# path: same arena generator, same held-out seeds 500 to 529, same policy. The
+# only thing that changes between this run and the Gazebo run is the physics, so
+# any difference in the numbers is the gap and not a change of task.
+#
+# Swap policy_args.path to models/ppo_dense_progress_dr to score the
+# domain-randomised policy from Exercise 10.2 on the same arenas.
+system_label: ppo_dense_surrogate
+scenario: training_grammar_seeds_500_529
+env_factory: arc_rl.nav_core:FastNavEnv
+env_args:
+  scenario_factory: arc_rl.arenas:training_scenario
+  reward: dense_progress
+  randomise_start: false
+policy_factory: starters.lab09.train:make_policy_from
+policy_args:
+  path: models/ppo_dense_progress
+seeds: [500, 501, 502, 503, 504, 505, 506, 507, 508, 509,
+        510, 511, 512, 513, 514, 515, 516, 517, 518, 519,
+        520, 521, 522, 523, 524, 525, 526, 527, 528, 529]
+max_steps: 900
+out: results/lab10_surrogate.json

@@ -10,10 +10,10 @@ This folder spans Labs 3 to 5 and it is what Project 1 is built from.
 | --- | --- | --- |
 | `motion.py` | 4 | the robot, the unicycle model, actuator lag |
 | `gridmap.py` | 4 | the six maps, and the helpers that measure a path |
-| `planners_skeleton.py` | 4 | **you edit.** BFS, DFS, Dijkstra, A*, nine TODOs |
-| `control_skeleton.py` | 4 | **you edit.** PID and Pure Pursuit, eleven TODOs |
-| `reactive_skeleton.py` | 3, 4 | **you edit.** Emergency braking and follow the gap, thirteen TODOs |
-| `coverage_skeleton.py` | 4 | **you edit.** Boustrophedon coverage, eight TODOs |
+| `planners_skeleton.py` | 4 | **you edit.** BFS, DFS, Dijkstra, A*, sixteen TODO markers |
+| `control_skeleton.py` | 4 | **you edit.** PID and Pure Pursuit, sixteen TODO markers |
+| `reactive_skeleton.py` | 3, 4 | **you edit.** Emergency braking and follow the gap, eighteen TODO markers |
+| `coverage_skeleton.py` | 4 | **you edit.** Boustrophedon coverage, thirteen TODO markers |
 | `sensing.py` | 3 | a LiDAR simulated on a grid map |
 | `planners.py`, `control.py` | | reference implementations to compare against |
 | `tests/` | | 168 tests, and the specification |

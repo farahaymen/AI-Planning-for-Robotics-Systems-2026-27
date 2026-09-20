@@ -2,49 +2,24 @@
 """
 arc-drive - drive the robot around a building on its own, so it can be mapped.
 
-Lab 5 is about SLAM. It is not about keyboard skill, and asking thirty students
-to teleop a robot around a warehouse for fifteen minutes on a virtual machine
-produces frustration, inconsistent maps, and a lab session that overruns. This
-drives instead.
+Saves a Lab 5 session from fifteen minutes of teleop per student.
 
     arc-drive                      wander until stopped with Ctrl-C
     arc-drive --for 300            wander for five minutes, then stop
     arc-drive --speed 0.25         slower, which maps better
     arc-drive --dry-run            print what it would command, publish nothing
 
-WHAT IS DRIVING
+It runs the follow-the-gap controller from Lab 4 inside the emergency brake
+from Lab 3, both imported from `starters/algorithms` unchanged. This file is
+only the ROS plumbing: LaserScan in, Twist out. Point ARC_REACTIVE at your own
+file to drive with your own controller.
 
-The follow-the-gap controller from Lab 4, wrapped in the emergency brake from
-Lab 3, both imported from `starters/algorithms` unchanged. Nothing is
-reimplemented here. This file is the ROS plumbing and nothing else: it turns a
-LaserScan into the array those functions expect, and turns their answer into a
-Twist.
+Gap following has no memory, so it will re-enter a dead end it has already
+visited and it never knows when it has finished. Frontier exploration in Lab 7
+is the fix.
 
-That is deliberate. The algorithms the students write in Lab 3 and Lab 4 are
-the algorithms that map the building in Lab 5, which is a better argument for
-them than any amount of saying so. A student can point `ARC_REACTIVE` at their
-own file and watch their own controller do the work.
-
-WHAT IT WILL AND WILL NOT DO
-
-Gap following has no memory. It is competent in corridors and rooms, and it
-will cheerfully drive into a dead end, turn round, come out, and go straight
-back in. Left running it covers most of a building through sheer persistence,
-but it makes no promises and it never knows it is finished.
-
-That limitation is the point, and it is the bridge to Lab 7: a robot that
-remembers where it has not been yet drives to the FRONTIER, which is the
-boundary between mapped and unknown, and can therefore tell you when it has
-finished. Watch this one revisit the same aisle three times and the case for
-frontier exploration makes itself.
-
-SAFETY
-
-The emergency brake wraps the controller, so it sits between the behaviour and
-the wheels and can only ever reduce speed, never command motion. If scans stop
-arriving for more than half a second the node commands zero regardless of what
-the controller last said, because a controller acting on a stale picture of the
-world is worse than one that is not acting at all.
+The brake sits between the controller and the wheels and can only reduce speed.
+If scans stop for more than half a second the node commands zero.
 """
 
 from __future__ import annotations
@@ -133,7 +108,7 @@ def main(argv=None) -> int:
     state = {"controller": None, "raw": None, "spec": None, "last_scan": 0.0,
              "started": time.time(), "last_report": 0.0, "commands": 0,
              "braked": 0, "v": 0.0, "w": 0.0, "nearest": math.inf,
-             "stop": False}
+             "stop": False, "scans": 0}
 
     def build(msg: LaserScan):
         """Construct the controller from the SENSOR, not from assumptions.
@@ -188,6 +163,7 @@ def main(argv=None) -> int:
 
         state["v"], state["w"] = v, w
         state["last_scan"] = time.time()
+        state["scans"] += 1
         state["commands"] += 1
 
         if not args.dry_run:
@@ -198,21 +174,43 @@ def main(argv=None) -> int:
 
     def on_timer() -> None:
         now = time.time()
+        elapsed = now - state["started"]
 
-        # Failsafe. If the scans have stopped, the picture the controller is
-        # acting on is stale and the only safe command is zero.
-        if state["last_scan"] and (now - state["last_scan"]) > 0.5:
+        # No scan has ever arrived. Reporting v 0.00 and nearest inf here would
+        # be the initial state of the dictionary, which looks like a robot
+        # waiting patiently rather than a node nobody is publishing to.
+        if state["scans"] == 0:
+            if elapsed > 5.0 and now - state["last_report"] >= 5.0:
+                state["last_report"] = now
+                print(f"  {elapsed:5.0f} s   NO MESSAGES on {args.scan}.",
+                      flush=True)
+                print("          Nothing has been published since this started, "
+                      "so there is nothing to drive on.", flush=True)
+                print("          Is the simulation running? It is the first "
+                      "terminal:", flush=True)
+                print("            ros2 launch arc_gazebo simulation.launch.py "
+                      "headless:=true", flush=True)
+                print(f"          Check with:  ros2 topic hz {args.scan}",
+                      flush=True)
+            return
+
+        # Failsafe. Scans were arriving and have stopped, so the picture the
+        # controller is acting on is stale and the only safe command is zero.
+        if (now - state["last_scan"]) > 0.5:
             if not args.dry_run:
                 publisher.publish(Twist())
-            node.get_logger().warn("no scan for 0.5 s, holding still",
-                                   throttle_duration_sec=5.0)
+            node.get_logger().warn(
+                f"no scan on {args.scan} for "
+                f"{now - state['last_scan']:.1f} s, holding still",
+                throttle_duration_sec=5.0)
 
         if now - state["last_report"] >= 5.0:
             state["last_report"] = now
-            elapsed = now - state["started"]
+            rate = state["scans"] / max(elapsed, 1e-6)
             print(f"  {elapsed:5.0f} s   v {state['v']:5.2f} m/s   "
                   f"w {state['w']:+5.2f} rad/s   "
                   f"nearest {state['nearest']:5.2f} m   "
+                  f"scans {state['scans']:5d} ({rate:4.1f} Hz)   "
                   f"brake fired {state['braked']} times", flush=True)
 
         if args.duration and (now - state["started"]) >= args.duration:
@@ -242,8 +240,13 @@ def main(argv=None) -> int:
                 publisher.publish(Twist())
                 time.sleep(0.05)
         elapsed = time.time() - state["started"]
-        print(f"stopped after {elapsed:.0f} s, {state['commands']} commands, "
-              f"brake fired {state['braked']} times")
+        if state["scans"] == 0:
+            print(f"stopped after {elapsed:.0f} s having received NOTHING on "
+                  f"{args.scan}. The robot was never commanded to move.")
+        else:
+            print(f"stopped after {elapsed:.0f} s, {state['scans']} scans, "
+                  f"{state['commands']} commands, "
+                  f"brake fired {state['braked']} times")
         node.destroy_node()
         rclpy.shutdown()
     return 0

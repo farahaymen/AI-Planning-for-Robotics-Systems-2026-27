@@ -10,7 +10,9 @@ date: "Duration 2 hours | ARC VM 2026.1"
 **Course** Autonomous Robotics with ROS 2: Mapping, Navigation and Reinforcement Learning
 **Duration** 2 hours
 **Environment** ARC VM 2026.1 (Ubuntu 24.04, ROS 2 Jazzy, Gazebo Harmonic, Nav2 Jazzy)
-**Packages** `arc_rl`, `arc_eval`, `arc_nav`, `stable_baselines3`, `nav2_bringup`
+**Python packages** `stable_baselines3`
+**ROS packages** `arc_nav`, `nav2_bringup`
+**Course modules** `arc_rl`, `arc_eval`, in the repository root. Both are plain Python packages, not ROS packages: each carries a `COLCON_IGNORE` and no `package.xml`, so `colcon` skips them and `ros2 run` will not find them. Run them as modules from the repository root, for example `python3 -m arc_eval.runner`.
 
 **Prerequisites**
 
@@ -46,9 +48,11 @@ diagnose.
 
 **Learned.** LiDAR in, velocity out. No map, no plan, no explicit state. Reactive,
 fast, and with a planning horizon set by the discount factor. At gamma 0.99 and a
-0.05 second control period, that horizon is roughly three seconds. A policy like
-this cannot represent a route across a building, because rewards from the far side
-of a building are discounted to nothing.
+0.05 second control period, the conventional horizon 1/(1 - gamma) is 100 steps,
+which is 5 seconds. A reward three seconds out still carries 0.99^60 = 0.55 of
+its value; one thirty seconds out carries 0.99^600 = 0.002. A policy like this
+cannot represent a route across a building, because rewards from the far side of
+a building are discounted to nothing.
 
 That last sentence is the single most important thing in this lab and you should
 be able to derive it. A purely learned local policy is not a navigation system. It
@@ -178,9 +182,26 @@ matched arenas.
 
 ```
 python3 -m arc_eval.runner --config arc_eval/configs/lab10_surrogate.yaml
-python3 -m arc_eval.runner --config arc_eval/configs/lab10_gazebo.yaml
-python3 -m arc_eval.runner --compare results/lab10_surrogate.json results/lab10_gazebo.json
 ```
+
+> **The Gazebo half of this exercise is not available in this release.**
+> Running a trained policy against Gazebo needs an environment that serves the
+> `arc_rl.nav_core` observation contract over ROS, and that environment does not
+> exist in this repository. `arc_eval/ros_nav2_env.py` is not it: it is an
+> adapter for benchmarking the Nav2 stack, and it sends one `NavigateToPose`
+> goal rather than stepping a policy on an observation vector. Any reference you
+> find to `arc_rl/ros_nav_env.py` or `RosNavEnv`, including the one in the
+> `arc_rl/nav_core.py` docstring, describes planned work rather than a file you
+> can open.
+>
+> Until it exists, run the surrogate column and fill in the Gazebo column from
+> the demonstrator's Stage 1 run rather than from your own measurement, and mark
+> it in your write-up as observed rather than measured. Then complete the
+> reasoning table below in full: predicting the direction of each effect and
+> justifying it is the part of this exercise that is actually assessed, and it
+> does not depend on having both numbers. If you want the measurement, building
+> that environment against the contract in `arc_rl/nav_core.py` is a good
+> Project 2 topic.
 
 | Metric | Surrogate | Gazebo | Change |
 |--------|-----------|--------|--------|
@@ -218,6 +239,13 @@ Retrain with domain randomisation and measure whether it helped.
 python3 starters/lab09/train.py --reward dense_progress --steps 200000 \
     --domain-randomisation
 ```
+
+This saves to `models/ppo_dense_progress_dr`. With `--domain-randomisation` set
+the script appends the `_dr` suffix so the run does not overwrite
+`models/ppo_dense_progress`, which is the Lab 9 policy that Exercise 10.3 loads.
+Pass `--name` if you want a different stem. To score it, copy
+`arc_eval/configs/lab10_surrogate.yaml`, point `policy_args.path` at the `_dr`
+model and give it its own `out`.
 
 With randomisation on, the sensor noise standard deviation is resampled each
 episode. That is a narrow form of randomisation and deliberately so; the exercise
@@ -405,3 +433,13 @@ Not required for this course. Worth knowing what it does before an interview.
 ROSCon talks on deploying learned components in production navigation stacks.
 Prefer talks by people shipping robots over talks by people publishing papers;
 the failure modes they describe are the ones this lab measured.
+
+## Further reading
+
+`docs/references.md` has a fuller list under **Lab 10. The simulation to reality
+gap**. Read the Kolomeytsev and Golembiovsky hybrid planning paper first, since
+it is the clean version of the pattern Exercise 10.3 shows failing: A* produces
+global checkpoints and a learned local policy handles what happens between them.
+For what deploying a learned policy actually costs, the Boston Dynamics write-up
+in the Industry subsection reports over a million randomised simulations and a
+2,000 hours per week robustness fleet.

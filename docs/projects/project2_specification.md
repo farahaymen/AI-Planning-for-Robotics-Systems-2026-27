@@ -275,3 +275,15 @@ that your robot won a competition. It is that you built an autonomous navigation
 system, measured it against a baseline over thirty seeds, found where it failed,
 explained why, and can say what you would do differently. That answer is
 available to every team here regardless of where they finish on the day.
+
+## 12. Further reading
+
+`docs/references.md` has a section called **Applications. How planning differs
+by product**, and it is the one to read before you choose an approach. Not every
+robot has the same planning problem, and the differences are larger than they
+look: coverage, warehouse multi-agent coordination, sidewalk delivery under
+travel-time uncertainty and agricultural autonomy are four genuinely different
+problems with four different cost functions. The **Where Paths Collide** survey
+is the most useful single item if your entry involves more than one robot, and
+the Nav2 coverage server documentation in the same section is the production
+version of the coverage planner you wrote in Lab 4.

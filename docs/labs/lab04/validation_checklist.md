@@ -9,7 +9,7 @@ Lab 4 has no live simulator dependency and must pass in graphics Tier C.
 | ID | Check | How | Status |
 |----|-------|-----|--------|
 | V4.1 | Reference bag reads without ROS running | `read_run` on `reference_run.mcap` | |
-| V4.2 | Scan messages report 360 beams and the expected angle increment | | |
+| V4.2 | Scan messages report 360 beams and the expected angle increment | `ros2 topic echo /scan --once --full-length`; without `--full-length` echo truncates `ranges` at 128 entries and the count cannot be read | |
 | V4.3 | Quaternion to yaw conversion matches `tf2_echo` on the same bag | | |
 | V4.4 | Nearest pose matching produces monotonic timestamps | | |
 | V4.5 | Reference solution builds a recognisable map of the warehouse | visual | |

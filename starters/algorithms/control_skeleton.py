@@ -56,24 +56,20 @@ class PID:
 
     def __call__(self, error: float) -> float:
         # TODO 1: if self.wrap is True, fold the error with wrap_angle first.
-        #         A heading error is circular: the difference between 179 and
-        #         -179 degrees is two degrees, not 358. Skip this and the robot
-        #         will occasionally spin all the way round the wrong way.
+        #         179 to -179 degrees is a difference of two, not 358. Without
+        #         this the robot sometimes spins the long way round.
         #
-        # TODO 2: accumulate the integral: self._integral += error * self.dt,
-        #         then CLAMP it to +/- self.integral_limit.
-        #         The clamp is anti-windup and it is not optional. A robot held
-        #         against a wall accumulates integral the whole time it is stuck,
-        #         and when it comes free it spins off ten seconds of stored error.
+        # TODO 2: self._integral += error * self.dt, then clamp it to
+        #         +/- self.integral_limit. This is anti-windup: a robot held
+        #         against a wall otherwise stores up error the whole time and
+        #         spins it off when it comes free.
         #
-        # TODO 3: compute the derivative, (error - self._previous) / self.dt.
-        #         On the very first call there is no previous error. Use 0.0
-        #         rather than the error itself, or the first control cycle
-        #         produces a large kick that you will see as a lurch.
-        #         Then store the current error in self._previous.
+        # TODO 3: derivative is (error - self._previous) / self.dt. Use 0.0 on
+        #         the first call, not the error itself, or the first cycle
+        #         lurches. Then store the current error in self._previous.
         #
-        # TODO 4: combine the three terms, clamp the result to
-        #         +/- self.output_limit, and return it as a float.
+        # TODO 4: combine the three terms, clamp to +/- self.output_limit, and
+        #         return a float.
         raise NotImplementedError("TODO: implement PID.__call__")
 
 

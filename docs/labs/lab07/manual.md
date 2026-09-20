@@ -335,11 +335,21 @@ people out every time.
 
 ### Exercise 7.3: the difficult robot (25 minutes)
 
-You are given a navigation stack with three faults injected. Fix them, using the
-behaviour tree log and the diagnostic workflow.
+You are given a navigation stack with one fault injected per scenario. Fix them,
+using the behaviour tree log and the diagnostic workflow.
 
 ```
 ros2 launch arc_lab7 difficult_robot.launch.py scenario:=1
+```
+
+The launch file brings up the simulator and Nav2, waits for the lifecycle nodes
+to reach active, and only then applies the fault, because setting a parameter on
+an inactive node does nothing. The `map` argument defaults to
+`~/arc_ws/maps/slam_map.yaml`, the map you saved in Lab 5, so you normally pass
+only the scenario. Override it if your map is elsewhere:
+
+```
+ros2 launch arc_lab7 difficult_robot.launch.py scenario:=1 map:=/path/to/other.yaml
 ```
 
 | Scenario | Symptom you observe | Diagnosis | What you changed |
@@ -348,23 +358,39 @@ ros2 launch arc_lab7 difficult_robot.launch.py scenario:=1
 | 2 | | | |
 | 3 | | | |
 
-The faults come from this set: a recovery loop that never terminates because the
-retry count is too high, an inflation radius that closes the only doorway, a
-collision monitor polygon large enough that the robot stops before it can move at
-all, a goal checker tolerance tighter than the controller can achieve, and a
-progress checker whose movement allowance is shorter than a spin recovery takes.
+Five scenarios are defined in `arc_lab7/config/scenarios.yaml` and each sets a
+single parameter on a single node:
 
-The last one is worth flagging in advance because it is genuinely subtle. The
-progress checker declares failure while a legitimate recovery is in progress, so
-the robot appears to abandon recoveries halfway through for no reason.
+1. `FollowPath.max_vel_x` on `/controller_server` dropped to 0.02 m/s. The path
+   plans and the robot creeps, until the progress checker decides it is stuck.
+2. `inflation_layer.inflation_radius` on `/global_costmap/global_costmap` raised
+   to 0.95, which closes the 1.2 m doorway and leaves no valid path.
+3. `PolygonStop.radius` on `/collision_monitor` raised to 1.5 m, so the monitor
+   stops the robot before it can move at all.
+4. `progress_checker.movement_time_allowance` on `/controller_server` cut to
+   1.0 s, which is shorter than a spin recovery takes.
+5. `GridBased.tolerance` on `/planner_server` cut to 0.01 m, so the planner
+   rejects goals near obstacles.
+
+Scenario 4 is worth flagging in advance because it is genuinely subtle. A spin
+of 1.57 rad takes about 1.6 s plus acceleration, so the progress checker
+declares failure while a legitimate recovery is still running, and the robot
+appears to abandon recoveries halfway through for no reason.
 
 ### Exercise 7.4: the collision monitor (15 minutes)
 
 Configure the monitor and then verify it does what you configured, rather than
 assuming.
 
+The shipped `collision_monitor` section of `arc_nav/config/nav2_dwb.yaml`
+declares one polygon, `PolygonStop`, a 0.32 m circle that zeroes the command.
+Add a second, larger polygon that slows down rather than stopping, so you can
+watch the two act in sequence as you approach a wall. Edit the
+`collision_monitor` section so that it reads:
+
 ```yaml
-# arc_nav/config/nav2_dwb.yaml, collision_monitor section
+# arc_nav/config/nav2_dwb.yaml, collision_monitor section, AFTER your edit.
+# PolygonSlow is the block you are adding; PolygonStop is already there.
 polygons: ["PolygonSlow", "PolygonStop"]
 PolygonSlow:
   type: "circle"
@@ -502,3 +528,13 @@ ISO 3691-4, Industrial trucks: safety requirements and verification, part 4,
 driverless industrial trucks and their systems. You are not expected to read the
 standard, which is not freely available. You are expected to know it exists and
 what category of requirement it imposes.
+
+## Further reading
+
+`docs/references.md` has a fuller list under **Lab 7. Robustness and recovery**.
+The one worth your time is the Iovino et al. survey of behaviour trees in
+robotics: it classifies 166 papers and explains why behaviour trees scale where
+finite state machines do not, which is the argument behind the recovery subtree
+you spent this lab editing. If you would rather read something operational, the
+runtime verification guidelines in the same section are about diagnosing faults
+in a running system rather than in simulation.

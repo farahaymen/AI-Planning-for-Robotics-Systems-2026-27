@@ -45,5 +45,5 @@ def test_ten_percent_radius_error_gives_ten_percent_distance_error():
 
 
 def test_peak_wheel_speed_is_within_the_command_interface_limit():
-    """The ros2_control block allows +/- 10 rad/s. Confirm the limits fit."""
+    """The ros2_control block allows +/- 20 rad/s. Confirm the limits fit."""
     assert wheel_speed_limits() <= 20.0, "velocity limits demand more than the interface allows"

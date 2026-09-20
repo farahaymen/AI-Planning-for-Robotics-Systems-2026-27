@@ -13,7 +13,7 @@ requires the simulator and must pass in Tier B.
 | V2.2 | `check_urdf` reports a single connected tree | | |
 | V2.3 | `display.launch.py` shows the robot correctly in RViz | | |
 | V2.4 | `view_frames` produces a tree with no orphans | | |
-| V2.5 | `tf2_echo base_link laser_link` matches the URDF origin exactly | 0.10, 0, 0.08 | |
+| V2.5 | `tf2_echo base_link laser_link` matches the URDF origin exactly | 0.10, 0, 0.12 | |
 | V2.6 | Camera link and optical link from Code 2.1 expand and appear | | |
 | V2.7 | The optical frame rotation is correct (z forward, x right) | `tf2_echo` | |
 | V2.8 | `broken_tf.urdf.xacro` fails in the documented way | | |

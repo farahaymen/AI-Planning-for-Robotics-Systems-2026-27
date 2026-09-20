@@ -10,7 +10,7 @@ date: "Duration 2 hours | ARC VM 2026.1"
 **Course** Autonomous Robotics with ROS 2: Mapping, Navigation and Reinforcement Learning
 **Duration** 2 hours
 **Environment** ARC VM 2026.1 (Ubuntu 24.04, ROS 2 Jazzy, Gazebo Harmonic)
-**Packages** `arc_description`, `robot_state_publisher`, `tf2_ros`, `tf2_tools`, `ros2_control`, `diff_drive_controller`, `xacro`
+**Packages** `arc_description`, `arc_gazebo`, `robot_state_publisher`, `tf2_ros`, `tf2_tools`, `ros2_control`, `diff_drive_controller`, `xacro`
 
 **Prerequisites**
 
@@ -368,6 +368,10 @@ print(odometry_scale_error(assumed_radius=0.055, true_radius=0.050))
 Now measure it. Start the simulation, inspect the controllers, drive a known
 distance, and read the odometry.
 
+```
+ros2 launch arc_gazebo simulation.launch.py headless:=true
+```
+
 **Code 2.2: Driving a fixed distance and reading the reported result**
 
 ```python
@@ -428,6 +432,10 @@ def main():
     finally:
         node.destroy_node()
         rclpy.shutdown()
+
+
+if __name__ == "__main__":
+    main()
 ```
 
 Run it once with the correct radius, then edit `wheel_radius` in
@@ -464,7 +472,7 @@ much easier if you have compiled it at least once.
 `arc_lab2_cpp` contains a small `rclcpp` node that subscribes to `/joint_states`
 and warns when a wheel exceeds a configured speed. Make two changes:
 
-1. Change the declared parameter default `max_wheel_speed` from 20.0 to 16.5,
+1. Change the declared parameter default `max_wheel_speed` from 20.0 to 16.3,
    the value the kinematics demanded above.
 2. Change the subscribed topic from `/joint_states` to `/dynamic_joint_states`
    and then change it back, so that you see the build and run cycle twice.
@@ -496,6 +504,7 @@ Commit and push, then submit:
 Run the self check first:
 
 ```
+cd ~/arc_ws/src/arc-course
 pytest starters/lab02/tests -v
 ```
 
@@ -512,6 +521,7 @@ have no transform.
 **Xacro fails to expand.**
 
 ```
+cd ~/arc_ws/src/arc-course
 xacro arc_description/urdf/arc_bot.urdf.xacro > /tmp/check.urdf
 check_urdf /tmp/check.urdf
 ```
@@ -604,3 +614,16 @@ the boundary discussed in the industry section.
 `ros2_control` architecture talks from ROSCon, on the Open Robotics YouTube
 channel. The diagrams alone are worth the time, particularly the one showing the
 resource manager mediating between controllers and hardware components.
+
+---
+
+## Further reading
+
+`docs/references.md` has a fuller list under **Lab 2. Robot description and
+differential drive kinematics**, with papers, industry write-ups and the
+documentation worth keeping open. Every entry says what you get from it and
+which part of the lab it connects to.
+
+If you read one thing, read *Understanding URDF: A Dataset and Analysis* (Tola
+and Corke, 2023). It analyses 322 real URDF files and reports which conventions
+and which mistakes actually occur, which is useful before you write your own.
