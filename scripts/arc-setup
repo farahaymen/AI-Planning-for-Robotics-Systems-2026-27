@@ -231,7 +231,39 @@ fi
 
 say "offline test suite"
 cd "$SRC" || die "cannot enter $SRC"
-python3 -m pytest starters arc_eval -q 2>&1 | tail -3
+
+# The ARC_* selectors are intentionally used in the lab manuals to run the
+# tests against an incomplete student skeleton, for example:
+#
+#   ARC_COVERAGE=coverage_skeleton python3 -m pytest ...
+#
+# A selector exported in a terminal (or accidentally added to .bashrc) used to
+# leak into this official environment check.  The result looked like a damaged
+# VM: exactly the skeleton's expected failures were reported even though the
+# reference implementation was healthy.  arc-setup is a reference-image gate,
+# so always test the reference modules and leave skeleton testing to the lab
+# commands that opt into it explicitly.
+TEST_SELECTORS=(
+  ARC_OCCUPANCY ARC_PARTICLE_FILTER ARC_GRID_TOOLS ARC_NAV_CORE
+  ARC_PLANNERS ARC_CONTROL ARC_REACTIVE ARC_COVERAGE ARC_INTEGRATION
+)
+ENV_CLEAN=(env)
+IGNORED_SELECTORS=()
+for selector in "${TEST_SELECTORS[@]}"; do
+  ENV_CLEAN+=(--unset="$selector")
+  if [[ -n "${!selector-}" ]]; then
+    IGNORED_SELECTORS+=("$selector")
+  fi
+done
+if [[ ${#IGNORED_SELECTORS[@]} -gt 0 ]]; then
+  note "ignoring exercise selector(s): ${IGNORED_SELECTORS[*]}"
+fi
+
+TEST_LOG="$WS/.arc/offline-tests.log"
+if ! "${ENV_CLEAN[@]}" python3 -m pytest starters arc_eval -q 2>&1 | tee "$TEST_LOG"; then
+  die "offline test suite failed. Full output saved to $TEST_LOG"
+fi
+note "full output saved to $TEST_LOG"
 
 say "environment check"
 course-check || die "course-check failed. Note the incident ID above."

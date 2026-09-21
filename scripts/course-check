@@ -197,9 +197,11 @@ def check_tools(rep: Report) -> None:
 def check_workspace(rep: Report) -> None:
     ws = Path.home() / "arc_ws"
     rep.add("Workspace", "PASS" if ws.is_dir() else "FAIL", str(ws) if ws.is_dir() else "missing")
-    git_dir = ws / "src" / ".git"
-    rep.add("Workspace is a Git repo", "PASS" if git_dir.exists() else "WARN",
-            "yes" if git_dir.exists() else "no; work will be lost on VM reset",
+    repo = ws / "src" / "arc-course"
+    code, out = sh(["git", "-C", str(repo), "rev-parse", "--is-inside-work-tree"])
+    is_repo = code == 0 and out.splitlines()[-1:] == ["true"]
+    rep.add("Course source is a Git repo", "PASS" if is_repo else "WARN",
+            str(repo) if is_repo else f"not detected at {repo}; updates cannot be pulled",
             required=False)
 
 

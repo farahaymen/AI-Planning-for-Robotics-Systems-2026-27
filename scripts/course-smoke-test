@@ -332,20 +332,80 @@ class Smoke:
                  f"{second}", "a small number of seconds since start")
 
     def check_tf(self):
-        for parent, child in (("odom", "base_footprint"), ("base_link", "laser_link")):
-            code, out = self._run(
-                ["ros2", "run", "tf2_ros", "tf2_echo", parent, child], timeout=12)
-            ok = "Translation" in out
-            self.add(f"TF {parent} to {child}", ok,
-                     "resolves" if ok else "lookup failed")
+        """Resolve required transforms with a real TF buffer.
 
-    def check_relay(self):
-        """cmd_vel_relay must be running, or nothing unstamped reaches the wheels."""
-        nodes = self._run(["ros2", "node", "list"], timeout=15)[1]
-        running = "cmd_vel_relay" in nodes
-        self.add("cmd_vel_relay running", running,
-                 "running" if running else
-                 "absent - unstamped Twist will not reach the controller")
+        `tf2_echo` is a continuously running diagnostic program.  Killing it
+        after a fixed timeout and searching whatever text happened to reach a
+        pipe made this gate depend on CLI discovery and output timing.  A TF
+        buffer is the API the robot itself uses, and lets both transforms share
+        one discovery period while we retry up to a clear deadline.
+        """
+        pairs = (("odom", "base_footprint"), ("base_link", "laser_link"))
+        resolved = {pair: False for pair in pairs}
+        error = ""
+        node = None
+        listener = None
+        rclpy_started = False
+        try:
+            import rclpy
+            from rclpy.time import Time
+            from tf2_ros import Buffer, TransformListener
+
+            rclpy.init(args=None)
+            rclpy_started = True
+            node = rclpy.create_node(f"arc_smoke_tf_{os.getpid()}")
+            buffer = Buffer()
+            listener = TransformListener(buffer, node, spin_thread=False)
+            deadline = time.monotonic() + 20.0
+            while time.monotonic() < deadline and not all(resolved.values()):
+                rclpy.spin_once(node, timeout_sec=0.2)
+                for pair in pairs:
+                    if not resolved[pair]:
+                        resolved[pair] = buffer.can_transform(
+                            pair[0], pair[1], Time())
+        except Exception as exc:
+            error = f"TF listener error: {type(exc).__name__}: {exc}"
+        finally:
+            # Keep a reference to the listener throughout polling; otherwise
+            # its subscriptions can be destroyed during discovery.
+            if listener is not None:
+                del listener
+            if node is not None:
+                node.destroy_node()
+            if rclpy_started:
+                try:
+                    rclpy.shutdown()
+                except Exception:
+                    pass
+
+        for parent, child in pairs:
+            ok = resolved[(parent, child)]
+            self.add(f"TF {parent} to {child}", ok,
+                     "resolves" if ok else (error or "not available after 20 s"))
+
+    def check_relay(self, movement_ok: bool):
+        """Verify the Twist-to-TwistStamped path without trusting one cache.
+
+        The graph checks explain what is running.  The movement test is the
+        authoritative fallback: an unstamped Twist cannot move this controller
+        unless a working converter is present on the command path.
+        """
+        nodes = self._run(["ros2", "node", "list", "--no-daemon"], timeout=20)[1]
+        node_seen = any(name.rstrip("/").split("/")[-1] == "cmd_vel_relay"
+                        for name in nodes.split())
+        info = self._run(
+            ["ros2", "topic", "info", "/diff_drive_controller/cmd_vel", "-v"],
+            timeout=15)[1]
+        publisher_seen = ("cmd_vel_relay" in info and
+                          "geometry_msgs/msg/TwistStamped" in info)
+        ok = node_seen or publisher_seen or movement_ok
+        if node_seen or publisher_seen:
+            detail = "running; stamped controller publisher discovered"
+        elif movement_ok:
+            detail = "end-to-end verified; ROS graph discovery was delayed"
+        else:
+            detail = "absent - unstamped Twist did not reach the controller"
+        self.add("cmd_vel_relay running", ok, detail)
 
     def check_cmd_vel_types(self):
         """Two types on one topic is the silent failure this relay exists for."""
@@ -385,12 +445,15 @@ class Smoke:
         after = self._odom_xy()
 
         if before is None or after is None:
-            return self.add("robot moves on /cmd_vel", False, "no odometry")
+            self.add("robot moves on /cmd_vel", False, "no odometry")
+            return False
         moved = math.hypot(after[0] - before[0], after[1] - before[1])
         # 0.2 m/s for 5 s is 1.0 m. Accept 0.3 m: the point is that it moved at
         # all and in roughly the right amount, not that the physics is exact.
-        self.add("robot moves on /cmd_vel", moved > 0.3, f"{moved:.2f} m",
+        ok = moved > 0.3
+        self.add("robot moves on /cmd_vel", ok, f"{moved:.2f} m",
                  "more than 0.30 m")
+        return ok
 
     def _odom_xy(self):
         out = self._echo_once("/odom", "pose.pose.position")
@@ -547,9 +610,9 @@ def main() -> int:
             smoke.check_scan_values()
             smoke.check_tf()
             smoke.check_controllers()
-            smoke.check_relay()
             smoke.check_cmd_vel_types()
-            smoke.check_robot_moves()
+            movement_ok = smoke.check_robot_moves()
+            smoke.check_relay(movement_ok)
     finally:
         smoke.stop_simulation()
     return smoke.report(args.json)

@@ -185,10 +185,10 @@ This needs no ROS and no simulator, so it also confirms the Tier C fallback.
 
 ```bash
 cd ~/arc_ws/src/arc-course
-python3 -m pytest starters arc_eval -q       # 100 tests
+python3 -m pytest starters arc_eval -q       # 282 pass, 1 skipped
 ```
 
-**Gate 4.** 100 passed, 1 skipped. The skip is the ROS-dependent adapter test and
+**Gate 4.** 282 passed, 1 skipped. The skip is the ROS-dependent adapter test and
 is expected to run once ROS is sourced.
 
 ---
@@ -329,7 +329,7 @@ sudo ./60-finalise.sh                # only after every gate passes
 course-check                         # is everything present
 course-smoke-test                    # does the robot actually work
 course-smoke-test --headless         # the Tier B path
-python3 -m pytest starters arc_eval -q   # 100 offline tests
+python3 -m pytest starters arc_eval -q   # 282 pass, 1 skipped
 
 # diagnosis
 glxinfo -B | grep "OpenGL renderer"  # which graphics tier
@@ -347,7 +347,7 @@ ros2 run tf2_tools view_frames       # is the TF tree whole
 | 1 | Base OS matches the specification and reports the allocated resources |
 | 2 | `course-check` exits 0 in a new login shell |
 | 3 | `course-smoke-test` exits 0 with and without the GUI |
-| 4 | 100 offline tests pass |
+| 4 | 282 offline tests pass, 1 integration test skipped |
 | 5 | Every laboratory checklist signed off with measured timings |
 | 6 | The weakest laboratory PC passes Gates 2, 3 and 4 |
 | 7 | The exported OVA imports elsewhere and still passes |
