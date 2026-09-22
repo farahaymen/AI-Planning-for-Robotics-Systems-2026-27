@@ -23,7 +23,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from gridmap import empty_room
 
-V = importlib.import_module(os.environ.get("ARC_COVERAGE", "coverage"))
+from importlib.util import module_from_spec, spec_from_file_location
+
+selected_module = os.environ.get("ARC_COVERAGE", "coverage")
+if selected_module == "coverage":
+    # Load the lab file explicitly; a test plugin may have loaded another coverage module.
+    coverage_file = Path(__file__).resolve().parents[1] / "coverage.py"
+    spec = spec_from_file_location("arc_course_coverage", coverage_file)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Cannot load the lab coverage module: {coverage_file}")
+    V = module_from_spec(spec)
+    sys.modules[spec.name] = V
+    spec.loader.exec_module(V)
+else:
+    V = importlib.import_module(selected_module)
 
 
 def living_room():
