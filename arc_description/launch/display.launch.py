@@ -8,13 +8,17 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import Command, LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
 
 
 def generate_launch_description():
     model = LaunchConfiguration("model")
     share = FindPackageShare("arc_description")
-    description = Command(["xacro ", PathJoinSubstitution([share, "urdf", model])])
+    description = ParameterValue(
+        Command(["xacro ", PathJoinSubstitution([share, "urdf", model])]),
+        value_type=str,
+    )
 
     return LaunchDescription([
         DeclareLaunchArgument("model", default_value="arc_bot.urdf.xacro"),
