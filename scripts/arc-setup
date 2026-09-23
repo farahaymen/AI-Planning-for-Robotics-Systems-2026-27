@@ -7,6 +7,7 @@
 #     arc-setup                 clone or pull, build, install, test
 #     arc-setup --clean         wipe build/install/log first (use when builds act strange)
 #     arc-setup --no-test       build only, skip the verification
+#     arc-setup --unattended    verify without requesting an Ubuntu password
 #     arc-setup --repo URL      clone from a fork instead of the course repository
 #
 # The course repository is the default, so `arc-setup` on its own is enough.
@@ -21,7 +22,7 @@
 #   4. resolve dependencies with rosdep
 #   5. colcon build
 #   6. install course-check, course-smoke-test, arc-clean and arc-map-view
-#      system wide
+#      into the user's ~/.local/bin directory
 #   7. run the offline test suite
 #   8. run course-check and course-smoke-test
 set -uo pipefail
@@ -44,10 +45,12 @@ if [[ -z "$REPO" ]]; then REPO="$DEFAULT_REPO"; fi
 
 CLEAN=0
 RUN_TESTS=1
+UNATTENDED=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --clean)   CLEAN=1; shift ;;
     --no-test) RUN_TESTS=0; shift ;;
+    --unattended) UNATTENDED=1; shift ;;
     --repo)    REPO="$2"; shift 2 ;;
     -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
     *) echo "unknown option: $1"; exit 2 ;;
@@ -58,6 +61,17 @@ ok=$'\033[32m'; warn=$'\033[33m'; err=$'\033[31m'; off=$'\033[0m'
 say()  { echo; echo "${ok}==>${off} $*"; }
 note() { echo "    $*"; }
 die()  { echo "${err}FAILED:${off} $*" >&2; exit 1; }
+
+# User-owned commands can be updated without sudo. Put them ahead of any older
+# system-wide copies so this build uses the tools it has just installed.
+mkdir -p "$HOME/.local/bin"
+export PATH="$HOME/.local/bin:$PATH"
+
+# A desktop startup and a manual invocation must not update or build the same
+# workspace at the same time. Keep the lock until this process exits.
+mkdir -p "$WS/.arc"
+exec 9>"$WS/.arc/setup.lock"
+flock -n 9 || die "arc-setup is already running in another terminal."
 
 # ----- 0. stop anything still running ---------------------------------------
 # A previous launch left running will make the verification steps measure the
@@ -188,9 +202,17 @@ note "maps bags results .arc"
 # ----- 5. dependencies ------------------------------------------------------
 say "resolving dependencies"
 if command -v rosdep >/dev/null 2>&1; then
-  rosdep install --from-paths "$WS/src" --ignore-src -y --rosdistro "$ROS_DISTRO" \
-    2>&1 | tail -3 || note "${warn}rosdep reported problems; continuing${off}"
+  if [[ $UNATTENDED -eq 1 ]]; then
+    rosdep check --from-paths "$WS/src" --ignore-src --rosdistro "$ROS_DISTRO" \
+      || die "system packages are missing; run arc-setup manually to install them."
+  else
+    rosdep install --from-paths "$WS/src" --ignore-src -y --rosdistro "$ROS_DISTRO" \
+      2>&1 | tail -3 || note "${warn}rosdep reported problems; continuing${off}"
+  fi
 else
+  if [[ $UNATTENDED -eq 1 ]]; then
+    die "rosdep is not installed; complete the VM provisioning before automatic setup."
+  fi
   note "rosdep not installed; skipping"
 fi
 
@@ -214,11 +236,16 @@ set +u; source "$WS/install/setup.bash"; set -u
 note "$(ls "$WS/install" | grep -c '^arc_') arc packages installed"
 
 # ----- 7. install the course commands --------------------------------------
-say "installing course commands"
-for tool in course-check course-smoke-test arc-clean arc-setup arc-map-view arc-drive; do
+say "installing course commands for this user"
+for tool in course-check course-smoke-test arc-clean arc-setup arc-map-view arc-drive arc-autostart; do
   if [[ -f "$SRC/scripts/$tool" ]]; then
-    sudo install -m 0755 "$SRC/scripts/$tool" "/usr/local/bin/$tool" \
-      && note "$tool"
+    if [[ -x "$HOME/.local/bin/$tool" ]] && cmp -s "$SRC/scripts/$tool" "$HOME/.local/bin/$tool"; then
+      note "$tool (already current)"
+    else
+      install -m 0755 "$SRC/scripts/$tool" "$HOME/.local/bin/$tool" \
+        || die "could not install $tool in $HOME/.local/bin."
+      note "$tool"
+    fi
   fi
 done
 
