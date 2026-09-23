@@ -1,10 +1,5 @@
-# Runs the part of the suite that needs no ROS, on every push. Catches the class
-# of error that unit tests catch: a broken sensor model, a scoring formula that
-# rewards the wrong behaviour, an arena the robot cannot fit through.
-name: tests
-
+name: course-checks
 on: [push, pull_request]
-
 jobs:
   offline-tests:
     runs-on: ubuntu-24.04
@@ -12,8 +7,14 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
-      - name: Install dependencies
-        run: pip install "numpy<2" gymnasium pyyaml pytest pillow matplotlib
-      - name: Run the offline suite
-        run: python -m pytest starters arc_eval -q
+          python-version: '3.12'
+      - name: Install CPU learning dependencies
+        run: |
+          pip install 'torch>=2.8,<3' --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements-teaching.txt
+      - name: Run numerical, document and interface checks
+        run: python -m pytest starters arc_eval teaching/tests -q
+      - name: Check Python and shell syntax
+        run: |
+          python -m compileall -q arc_course arc_description arc_gazebo arc_nav arc_sensors arc_mapping arc_localization arc_recovery teaching starters
+          bash -n scripts/arc-setup scripts/arc-autostart scripts/build-manuals.sh

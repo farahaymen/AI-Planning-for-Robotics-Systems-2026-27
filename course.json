@@ -1,0 +1,68 @@
+{
+  "version": "nine-labs-2026-09-23",
+  "ros": "jazzy",
+  "gazebo": "harmonic",
+  "coursework_due_week": 6,
+  "coursework_labs": [
+    1,
+    2,
+    3,
+    4
+  ],
+  "labs": [
+    {
+      "number": 1,
+      "title": "Your first ROS 2 conversation",
+      "source": "docs/labs/lab01/manual.md",
+      "simulation": "ROS message stream; unchanged"
+    },
+    {
+      "number": 2,
+      "title": "Give the messages a robot, then make it move",
+      "source": "docs/labs/lab02/manual.md",
+      "simulation": "Gazebo"
+    },
+    {
+      "number": 3,
+      "title": "Build a map, estimate the route, and save the result",
+      "source": "docs/labs/lab03/manual.md",
+      "simulation": "Numerical mapping and Gazebo SLAM"
+    },
+    {
+      "number": 4,
+      "title": "Choose a route and control the robot along it",
+      "source": "docs/labs/lab04/manual.md",
+      "simulation": "Numerical robot replay"
+    },
+    {
+      "number": 5,
+      "title": "Assemble navigation with Nav2",
+      "source": "docs/labs/lab05/manual.md",
+      "simulation": "Gazebo"
+    },
+    {
+      "number": 6,
+      "title": "Learn a navigation decision from experience",
+      "source": "docs/labs/lab06/manual.md",
+      "simulation": "Numerical robot replay"
+    },
+    {
+      "number": 7,
+      "title": "Replace the table with a neural action-value function",
+      "source": "docs/labs/lab07/manual.md",
+      "simulation": "Numerical robot replay"
+    },
+    {
+      "number": 8,
+      "title": "Learn the policy directly, then train continuous control",
+      "source": "docs/labs/lab08/manual.md",
+      "simulation": "Numerical robot replay"
+    },
+    {
+      "number": 9,
+      "title": "Connect a learned policy to ROS and test the transfer",
+      "source": "docs/labs/lab09/manual.md",
+      "simulation": "Gazebo"
+    }
+  ]
+}

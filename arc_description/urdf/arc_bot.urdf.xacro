@@ -9,9 +9,9 @@
 
   <!-- Deliberate faults, used by the laboratory exercises. Default is a healthy
        robot; the launch files pass these when a fault scenario is requested.
-         fault=a  LiDAR update rate reduced to 3 Hz        (Lab 3)
-         fault=b  LiDAR gz_frame_id names a link that does not exist (Lab 3)
-         fault=c  LiDAR noise raised by two orders of magnitude       (Lab 3)
+         fault=a  LiDAR update rate reduced to 3 Hz        (Lab 2)
+         fault=b  LiDAR gz_frame_id names a link that does not exist (Lab 2)
+         fault=c  LiDAR noise raised by two orders of magnitude       (Lab 2)
          tf_fault=parent  laser_joint parent is a non-existent link   (Lab 2) -->
   <xacro:arg name="fault" default="none"/>
   <xacro:arg name="tf_fault" default="none"/>

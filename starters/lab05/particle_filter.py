@@ -101,10 +101,9 @@ class ParticleFilter:
     def update_weights(self, particle_errors: np.ndarray, sigma: float = 0.3) -> None:
         """Reweight particles from a per-particle measurement error.
 
-        Computing the error is the measurement model's job and is supplied in the
-        lab starter, because ray casting every beam for every particle is slow in
-        pure Python and is not the concept being taught. What matters here is the
-        shape: a Gaussian on the error, then normalise.
+        The caller supplies one error per particle. The teaching figure uses
+        synthetic landmark ranges; this helper does not implement AMCL's lidar
+        likelihood field. It applies a Gaussian to each error and normalises.
         """
         errors = np.asarray(particle_errors, dtype=np.float64)
         if errors.shape[0] != self.n:
@@ -131,9 +130,9 @@ class ParticleFilter:
     def resample(self) -> None:
         """Low variance (systematic) resampling.
 
-        One random number rather than n. Compared with drawing n independent
-        samples this preserves diversity better and runs in linear time, and it
-        is what AMCL uses.
+        One random offset places n evenly spaced samples on the cumulative
+        weight distribution. This teaching implementation illustrates resampling;
+        it does not reproduce AMCL's adaptive particle-count algorithm.
         """
         positions = (self.rng.random() + np.arange(self.n)) / self.n
         cumulative = np.cumsum(self.weights)

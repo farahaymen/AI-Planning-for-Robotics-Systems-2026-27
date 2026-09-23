@@ -11,8 +11,9 @@ goal on its first call and afterwards simply spins the executor and polls for
 completion while accumulating metrics. The policy passed to the runner is a stub
 that ignores its observation and returns None.
 
-STATUS: written, not yet validated inside the Golden VM. See
-docs/labs/lab06/validation_checklist.md items V6.9 to V6.13 before use.
+STATUS: experimental and excluded from the nine-lab execution path.
+No validated reset or physical contact metric is implemented here. Use the
+Lab 5 action client and Lab 9 single-episode ROS recorder for course experiments.
 """
 
 from __future__ import annotations
@@ -126,11 +127,11 @@ class Nav2EvalEnv:
         seeded comparison, so it should be visible in the code that claims it.
         """
         if self.reset_service is None:
-            return
+            raise NotImplementedError("No validated reset. Use the Lab 9 single-episode recorder.")
         # Implemented in the Lab 6 starter package against ros_gz_interfaces.
         raise NotImplementedError(
             "Wire _reset_world to the ros_gz world control service before use. "
-            "See validation checklist item V6.11."
+            "This adapter is outside the nine-lab execution path."
         )
 
     def _send_goal(self) -> None:

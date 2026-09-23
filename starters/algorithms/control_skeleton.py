@@ -22,7 +22,10 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from motion import ROBOT, Pose, wrap_angle
+try:
+    from .motion import ROBOT, Pose, wrap_angle
+except ImportError:  # Standalone exercise.
+    from motion import ROBOT, Pose, wrap_angle
 
 
 # ---------------------------------------------------------------------------

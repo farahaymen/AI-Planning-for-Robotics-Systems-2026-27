@@ -11,8 +11,8 @@ evaluation seeds used by arc_eval, so a single seed integer fully identifies an
 arena for grading and dispute resolution.
 
 Every generated arena is checked for reachability with a breadth first search on
-a coarse occupancy grid. This is the same BFS the students implement in Lab 4,
-reused here as a production validation step rather than a toy exercise.
+a coarse occupancy grid. This reuses the search idea discussed in Lab 4's
+optional planner comparison to validate generated static geometry.
 """
 
 from __future__ import annotations
@@ -100,7 +100,7 @@ def rasterise(scenario: Scenario, resolution: float, inflation: float) -> Occupa
 
 
 def bfs_reachable(grid: OccupancyGrid, start: tuple[int, int], goal: tuple[int, int]) -> bool:
-    """Four connected BFS. Identical in spirit to the Lab 4 student implementation."""
+    """Four-connected BFS, also explored in Lab 4's optional search comparison."""
     nx, ny = grid.width_cells, grid.height_cells
     sx, sy = start
     gx, gy = goal

@@ -11,19 +11,18 @@ makes the controller accept a plain Twist.
 
 Almost everything else in this course publishes an unstamped Twist:
 
-    teleop_twist_keyboard          Lab 3 driving, Lab 5 mapping runs
-    arc_lab5 drift_meter           Lab 2 and Lab 5 odometry measurement
-    arc_rl RosNavEnv               Lab 9 and Lab 10 policy execution
-    Nav2 controller_server         Lab 6 onward, on this distribution
+    teleop_twist_keyboard          Lab 2 driving, Lab 3 mapping runs
+    arc_localization drift_meter           optional odometry utility
+    Nav2 controller_server         Lab 5 onward, on this distribution
 
-Publishing the wrong type is a SILENT failure. The topic exists, both ends
-report healthy, `ros2 topic pub` prints happily, and the controller receives
-nothing. `ros2 topic info /cmd_vel` is the only place it shows, as two entries
-under Type. That is the same class of fault as a QoS mismatch, and it costs
-hours to find if you do not already know to look.
+Publishing the wrong type prevents data delivery even when endpoint discovery
+works. Inspect topic types and endpoint details rather than assuming a listed
+publisher controls the wheels. Logs may also report an incompatibility.
 
-So rather than rewriting six places to emit TwistStamped and losing
-teleop_twist_keyboard entirely, one small node converts at the boundary:
+The single-episode learned-policy adapter is in arc_course. Labs 7–9
+train and evaluate actions in FastNavEnv; Lab 9 also runs policies over ROS.
+
+One small node converts the existing command publishers at the boundary:
 
     anything  --Twist-->  /cmd_vel  --[this node]-->  TwistStamped  -->  controller
 

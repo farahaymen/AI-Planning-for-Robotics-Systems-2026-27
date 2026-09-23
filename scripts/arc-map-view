@@ -29,7 +29,7 @@ and on exit, from all the snapshots taken:
     warehouse_build.gif the map assembling itself
 
 The .pgm and .yaml pair is the real deliverable. It is what you hand to Nav2 in
-Lab 6 and what Project 1 localises against. The .png and the animation are for
+Lab 5 and what Project 1 localises against. The .png and the animation are for
 the report, and for seeing the loop closure snap the map straight, which is the
 single most instructive second in Lab 5 and is over before you can point at it.
 """
@@ -54,7 +54,7 @@ import numpy as np
 #
 #     -1        unknown. No beam has ever passed through this cell or landed
 #               in it. This is not "empty", it is "no information", and the
-#               difference is the whole of frontier exploration in Lab 7.
+#               difference is the whole of frontier exploration in Lab 4.
 #      0..100   the probability, as a percentage, that the cell is occupied.
 #               SLAM Toolbox publishes mostly 0 and 100 with a thin band of
 #               intermediate values along surfaces it has seen from few angles.

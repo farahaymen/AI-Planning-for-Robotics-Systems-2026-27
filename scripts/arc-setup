@@ -237,7 +237,7 @@ note "$(ls "$WS/install" | grep -c '^arc_') arc packages installed"
 
 # ----- 7. install the course commands --------------------------------------
 say "installing course commands for this user"
-for tool in course-check course-smoke-test arc-clean arc-setup arc-map-view arc-drive arc-autostart; do
+for tool in course-check course-smoke-test arc-clean arc-setup arc-map-view arc-drive arc-autostart course-lab-check; do
   if [[ -f "$SRC/scripts/$tool" ]]; then
     if [[ -x "$HOME/.local/bin/$tool" ]] && cmp -s "$SRC/scripts/$tool" "$HOME/.local/bin/$tool"; then
       note "$tool (already current)"
@@ -248,6 +248,15 @@ for tool in course-check course-smoke-test arc-clean arc-setup arc-map-view arc-
     fi
   fi
 done
+
+# Make the repository's pure Python teaching modules available to ROS nodes.
+# The path file is user-owned and follows this checked-out source tree.
+python3 - "$SRC" <<'PYTHONPATH_SETUP'
+import pathlib, site, sys
+folder = pathlib.Path(site.getusersitepackages())
+folder.mkdir(parents=True, exist_ok=True)
+(folder / 'arc_course_source.pth').write_text(sys.argv[1] + '\n')
+PYTHONPATH_SETUP
 
 # ----- 8. verify ------------------------------------------------------------
 if [[ $RUN_TESTS -eq 0 ]]; then

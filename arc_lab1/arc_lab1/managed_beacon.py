@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""A managed lifecycle node, for Exercise 1.3.
+"""A managed lifecycle node, used as an optional Lab 6 startup investigation.
 
 After `configure` the publisher EXISTS and the topic appears in `ros2 topic
 list`, and nothing is published. A topic existing is not the same as data

@@ -1,0 +1,19 @@
+<?xml version="1.0"?>
+<robot name="student_robot">
+  <link name="base_link">
+    <visual>
+      <geometry><box size="0.40 0.30 0.15"/></geometry>
+      <material name="body_blue"><color rgba="0.1 0.4 0.8 1"/></material>
+    </visual>
+  </link>
+  <link name="sensor_link">
+    <visual>
+      <geometry><cylinder radius="0.03" length="0.04"/></geometry>
+    </visual>
+  </link>
+  <joint name="sensor_mount" type="fixed">
+    <parent link="base_link"/>
+    <child link="sensor_link"/>
+    <origin xyz="0.10 0 0.12" rpy="0 0 0"/>
+  </joint>
+</robot>

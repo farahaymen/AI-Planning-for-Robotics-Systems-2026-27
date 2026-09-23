@@ -1,17 +1,10 @@
 """
 Autonomous Robotics Course (ARC) - shared navigation contract and fast surrogate.
 
-This module defines ONE observation and action contract that is shared by two
-environments:
-
-  1. FastNavEnv          pure NumPy, no ROS, no Gazebo, used for TRAINING
-  2. RosNavEnv           rclpy + Gazebo backed, used for EVALUATION and DEPLOYMENT
-                         (see arc_rl/ros_nav_env.py)
-
-Both environments import RobotSpec, ObsSpec and build_observation from here, so a
-policy trained in the surrogate can be loaded and executed against the real ROS
-stack without any change to the network shape or the meaning of any element of
-the observation vector.
+FastNavEnv is the NumPy training environment used in Labs 7-9. Lab 6 first
+uses a discrete grid robot. The single-episode ROS adapter is arc_course's
+policy_driver. It shares the observation/action contract, but does not reset
+Gazebo or remove the physics and sensor differences between environments.
 
 Course: Autonomous Robotics with ROS 2
 Baseline: ARC VM 2026.1
@@ -81,8 +74,9 @@ def downsample_scan(ranges: np.ndarray, n_beams: int = OBS.n_beams) -> np.ndarra
 
     The minimum rather than the mean is deliberate. A thin table leg that appears
     in one raw beam must survive downsampling, otherwise the policy learns to
-    drive through furniture. The ROS environment calls this on the incoming
-    sensor_msgs/LaserScan so that both environments see identical statistics.
+    drive through furniture. A future ROS adapter can use this on LaserScan
+    ranges after checking angular coverage and ordering. Sector minima from a
+    dense scan are not statistically identical to the surrogate's sparse rays.
     """
     ranges = np.asarray(ranges, dtype=np.float32)
     ranges = np.nan_to_num(ranges, nan=OBS.lidar_max_range,
@@ -155,7 +149,7 @@ def scale_action(action: np.ndarray, robot: RobotSpec = ROBOT) -> tuple[float, f
 
 
 # ---------------------------------------------------------------------------
-# Reward functions. Students compare at least two of these in Lab 9.
+# Reward functions. A second-reward comparison is an optional Lab 9 extension.
 # Keeping them as separate callables rather than if/else branches inside the
 # environment means a reward change never silently alters the observation or
 # termination logic, which is the usual source of unreproducible RL results.
@@ -178,8 +172,9 @@ class RewardTerms:
 def reward_dense_progress(t: RewardTerms) -> float:
     """Reward A: dense shaping on distance progress.
 
-    Trains quickly but is prone to reward hacking. Watch for policies that orbit
-    the goal collecting progress from oscillation rather than arriving.
+    Progress is signed: moving away undoes the undiscounted progress reward
+    for moving closer. Inspect measured success, collisions and timeouts; this
+    shaping formula alone does not guarantee a useful navigation policy.
     """
     r = 3.0 * (t.previous_goal_distance - t.goal_distance)
     r -= 0.01                                   # time penalty
@@ -196,9 +191,9 @@ def reward_dense_progress(t: RewardTerms) -> float:
 def reward_sparse_safe(t: RewardTerms) -> float:
     """Reward B: near sparse, heavier safety weighting.
 
-    Slower to train and needs more exploration, but the resulting policies keep
-    larger clearances. This is the pair that makes the Lab 9 comparison
-    interesting rather than decorative.
+    The larger proximity penalty is intended to discourage close approaches.
+    Its effect on learning speed and clearance must be measured on matched
+    held-out layouts; neither improvement is guaranteed.
     """
     r = -0.02
     if t.min_beam < 0.4:
@@ -299,14 +294,9 @@ def _distance_to_segments(px, py, segs):
 class FastNavEnv(gym.Env):
     """Headless 2D kinematic navigation environment.
 
-    This is the TRAINING environment. It contains no physics engine, no ROS and
-    no rendering, and it steps in the order of thousands of transitions per
-    second on a single CPU core inside the course VM. A PPO policy of the size
-    used in Lab 9 reaches competent navigation in roughly ten to fifteen minutes.
-
-    It deliberately shares nothing with Gazebo except the observation contract.
-    The difference between the two is not a defect to be minimised, it is the
-    simulation gap that Lab 10 asks students to measure.
+    Labs 7-9 use this for training and matched surrogate evaluations. It has
+    no physics engine. teaching.rollout writes an animated replay of its states.
+    The separate ROS policy adapter executes a trained policy in Gazebo.
     """
 
     metadata = {"render_modes": []}
@@ -377,8 +367,10 @@ class FastNavEnv(gym.Env):
         world_angles = self._angles + self.theta
         dx = np.cos(world_angles).astype(np.float32)
         dy = np.sin(world_angles).astype(np.float32)
-        r_seg = _ray_hits_segments(self.x, self.y, dx, dy, self._segments(), self.obs_spec.lidar_max_range)
-        r_cir = _ray_hits_circles(self.x, self.y, dx, dy, self._circles(), self.obs_spec.lidar_max_range)
+        laser_x = self.x + 0.10 * math.cos(self.theta)
+        laser_y = self.y + 0.10 * math.sin(self.theta)
+        r_seg = _ray_hits_segments(laser_x, laser_y, dx, dy, self._segments(), self.obs_spec.lidar_max_range)
+        r_cir = _ray_hits_circles(laser_x, laser_y, dx, dy, self._circles(), self.obs_spec.lidar_max_range)
         ranges = np.minimum(r_seg, r_cir)
         if self.lidar_noise_std > 0.0:
             ranges = ranges + self.np_random.normal(0.0, self.lidar_noise_std, ranges.shape)
@@ -487,7 +479,7 @@ class FastNavEnv(gym.Env):
             self.collisions += 1
 
         distance, _ = self._goal_relative()
-        reached = distance <= self.obs_spec.goal_tolerance
+        reached = distance <= self.obs_spec.goal_tolerance and not collided
         advanced = False
         if reached and self.goal_index < len(self.scenario.goals) - 1:
             self.goal_index += 1
@@ -511,7 +503,7 @@ class FastNavEnv(gym.Env):
         self._prev_goal_distance = self._goal_relative()[0] if advanced else distance
 
         terminated = bool(reached or collided)
-        truncated = bool(self.step_index >= self.scenario.max_episode_steps)
+        truncated = bool(not terminated and self.step_index >= self.scenario.max_episode_steps)
 
         if terminated and reached:
             reason = "goal_reached"

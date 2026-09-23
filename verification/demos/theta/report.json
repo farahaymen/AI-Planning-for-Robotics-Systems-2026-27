@@ -1,0 +1,15 @@
+{
+  "minimum_blocked_space_clearance_m": 0.056181058191561745,
+  "trajectory_valid": true,
+  "algorithm": "theta",
+  "controller": "pursuit",
+  "expanded": 813,
+  "goal_error_m": 0.14879500329129977,
+  "resolution": 0.1,
+  "origin": [
+    0.0,
+    0.0,
+    0.0
+  ],
+  "environment": "kinematic teaching simulation"
+}

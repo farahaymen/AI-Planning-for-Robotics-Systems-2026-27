@@ -22,7 +22,10 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-from motion import ROBOT, Pose, simulate
+try:
+    from .motion import ROBOT, Pose, simulate
+except ImportError:  # Standalone exercise.
+    from motion import ROBOT, Pose, simulate
 
 C_PATH = "#9aa4b2"
 C_GOOD = "#2a9d8f"

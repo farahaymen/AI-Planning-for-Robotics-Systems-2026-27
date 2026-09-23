@@ -1,902 +1,105 @@
----
-title: "Lab 6: Autonomous Navigation with Nav2"
-subtitle: "Autonomous Robotics with ROS 2: Mapping, Navigation and Reinforcement Learning"
-author: "British University in Egypt"
-date: "Duration 2 hours | ARC VM 2026.1"
----
+# Lab 6: Learn a navigation decision from experience
 
-# Lab 6: Autonomous Navigation with Nav2
+So far, you have written rules and supplied a map. **Reinforcement learning**, RL, asks a different question: can a decision rule improve through interaction and feedback? We start with a small grid robot so every number can be inspected. Neural networks are not needed yet.
 
-**Course** Autonomous Robotics with ROS 2: Mapping, Navigation and Reinforcement Learning
-**Duration** 2 hours
-**Environment** ARC VM 2026.1 (Ubuntu 24.04, ROS 2 Jazzy, Gazebo Harmonic, Nav2 Jazzy)
-**Packages** `nav2_bringup`, `nav2_navfn_planner`, `dwb_core`, `nav2_mppi_controller`, `nav2_costmap_2d`, `arc_nav`, `arc_eval`
+**Your result:** a moving grid-robot replay, a table learned from experience and a comparison with a solution calculated from a known model. This lab introduces the concepts while you implement an update. It does not ask you to memorise algorithm names before seeing what they do.
 
-**Prerequisites**
+## Describe one decision completely
 
-You will need the map you saved in Lab 5, your A* implementation from the
-planning notebook, and a working `course-check`. If you did not save a map, a
-reference map is provided in `arc_nav/maps/arc_warehouse.yaml`, and using it
-costs you nothing in this lab.
+The **agent** is the decision-making program. The **environment** is the world responding to its actions. At each step the agent observes the situation, chooses an action, receives a numerical reward, and sees what happened next. An **episode** is one complete attempt, ending at the goal or a chosen limit.
 
----
+| Concept | In this lab | Later in the ROS robot |
+|---|---|---|
+| State | Grid cell occupied by the robot | Full physical state, generally not directly available |
+| Observation | The same cell index | Laser measurements, relative goal and measured velocity |
+| Action | East, north, west or south | A velocity choice or a pair of continuous commands |
+| Reward | Goal reward minus movement/collision penalties | A numerical rule based on progress and outcomes |
+| Policy | Which action to choose in each cell | A function from observations to commands |
+| Transition | Probability of reaching another cell after an action | Motion, sensing and disturbances |
 
-## Before the session
+In a **Markov decision process**, the state contains enough information to predict the distribution of the next state and reward given the action. Our grid cell has this property under the defined model. One laser scan on a moving robot often does not: hidden obstacles, moving people and unobserved velocity can matter. That is partial observability. We will distinguish the physical state from the limited observation supplied to a learned policy.
 
-The reading below is the concept delivery for this lab. It replaces the lecture
-portion of the session, so the two hours in the laboratory can be spent building
-rather than listening. A short quiz on this material closes one hour before your
-session.
+The grid robot usually moves in the requested direction, but sometimes slips sideways. The code's `slip=0.1` means a total 10% probability of a perpendicular action, split equally between the two sides. A blocked movement leaves the robot in its current cell and gives a penalty. Reaching the goal ends the task.
 
-### Why this lab matters
+![The agent acts, receives a reward and updates its decision rule from the transition.](../../figures/nine/lab06_flow.png)
 
-Everything you have built so far has been a component. You wrote a planner that
-finds paths on a grid. You built a map of an environment and localised the robot
-within it. Neither of those is a navigation system, and the gap between the two
-is larger than it looks.
+## Why immediate reward is not enough
 
-A robot that can plan a path still has to follow it, and the world will not
-cooperate. The map is out of date the moment somebody leaves a trolley in a
-corridor. The path passes within two centimetres of a wall because the planner
-treats the robot as a point. The plan was computed once and the robot has since
-drifted. The controller commands a velocity the wheels cannot achieve. Handling
-all of this reliably, thousands of times a day, in a building full of people, is
-what separates a navigation demonstration from a navigation product.
+Moving toward the goal can require a detour. We therefore consider **return**, the sum of future rewards. With discount factor $\gamma$:
 
-Nav2 is the system that handles it, and it is the piece of software you are most
-likely to encounter directly if you work on mobile robots after you graduate.
+$$G_t=r_{t+1}+\gamma r_{t+2}+\gamma^2r_{t+3}+\cdots.$$
 
-### Where we are
+The subscript $t$ means the current decision time. A factor below one gives less weight to distant rewards. With rewards 1 now and 2 on the next step and $\gamma=0.9$, the return is $1+0.9\times2=2.8$. Discounting is part of the learning objective; it is not a measure of confidence in a sensor.
 
-In the planning notebook you ran breadth first search, Dijkstra and A* on a grid
-you invented. That grid was a NumPy array of zeros and ones, and it was
-convenient precisely because it was fake. In Lab 5 you produced a real map with
-SLAM Toolbox and localised against it with AMCL, which gave you a
-`nav_msgs/OccupancyGrid` and a `map` to `base_footprint` transform.
+The **value** $V(s)$ is expected future return from a state under a specified policy. **Action value** $Q(s,a)$ is expected return after choosing action $a$ in state $s$ and then following the policy. Expected means an average over possible outcomes, including slips.
 
-Those two things fit together. The occupancy grid is a NumPy array once you
-reshape it, and the transform tells you where the robot sits inside it. Today you
-join them, first by running your own A* on the real map, and then by handing the
-same job to Nav2 and looking carefully at what Nav2 does that your implementation
-does not.
+## Solve the small problem when the model is available
 
-### Learning outcomes
+Dynamic programming uses the transition model directly. **Value iteration** repeatedly asks, for every state, which action has the largest expected immediate reward plus discounted next-state value. **Policy iteration** alternates two tasks: evaluate the current policy, then improve its action choices using those values.
 
-By the end of this session you should be able to:
-
-1. Describe the Nav2 architecture in terms of its servers, its lifecycle
-   management and its behaviour tree, and explain what each one is responsible
-   for.
-2. Convert a ROS `OccupancyGrid` into a NumPy array and plan on it with your own
-   A*, then account for the differences between your path and the one Nav2
-   produces.
-3. Explain what a costmap layer does, and predict the effect of changing the
-   inflation radius on both path shape and clearance.
-4. Configure and run two different local controllers, and compare them using a
-   seeded benchmark rather than a single run.
-5. Diagnose a navigation stack that comes up but does not navigate.
-
-### The architecture
-
-![The Nav2 stack. Dashed grey: the behaviour tree sequencing the servers. Dashed red: the collision monitor's independent sensor subscription.](docs/figures/diagram_nav2_architecture.png){width=88%}
-
-### 1.1 Nav2 is a set of servers, not a library
-
-The first thing to understand about Nav2 is that it is not a function you call.
-It is a collection of independent ROS 2 nodes, each owning one responsibility,
-communicating over topics and actions. `planner_server` produces paths.
-`controller_server` produces velocities. `behavior_server` performs recovery
-actions such as spinning in place or backing up. `bt_navigator` decides the order
-in which all of that happens.
-
-This separation is what allows you to replace the local controller today without
-touching anything else, and it is the same property that allows a company to
-replace the global planner with something proprietary while keeping the rest of
-the stack.
-
-The second thing to understand is that these nodes are managed lifecycle nodes.
-You met the lifecycle concept in Lab 1, and this is where it starts to matter. A
-Nav2 node that has been launched is not necessarily doing anything. It has to be
-configured and then activated before it will accept work. When navigation
-mysteriously does nothing at all, the first question is not what is wrong with
-your goal, it is whether the servers are actually active:
-
-```
-ros2 lifecycle get /planner_server
-ros2 lifecycle get /controller_server
-ros2 lifecycle get /bt_navigator
+```bash
+python3 -m teaching.tabular --method value --out results/lab06_value
+python3 -m teaching.tabular --method policy --out results/lab06_policy
 ```
 
-An answer of `unconfigured` or `inactive` tells you the lifecycle manager did not
-finish its transitions, which usually means one of the nodes upstream failed and
-the manager stopped. That is a much more useful place to start looking than the
-goal pose.
+Open `replay.html` and `policy.png` in each folder. The arrows show greedy actions; colour shows estimated value. Both methods use the same known model. Equal-valued alternatives may give different arrows while achieving the same value. Inspect `GridRobot.transitions`, `action_values`, `value_iteration` and `policy_iteration` in `teaching/tabular.py`.
 
-The third thing is that you talk to Nav2 through an action, not a topic. Sending
-a goal on a topic gives you no feedback and no way to know whether it worked. The
-`navigate_to_pose` action gives you acceptance, continuous feedback including the
-number of recovery behaviours that have been triggered, and a final result code.
-You will use all three today.
+These methods are useful here as a reference answer. Calling them model-free learning would be incorrect because they explicitly use transition probabilities.
 
-### 1.2 Costmaps and layers
+## Learn when only sampled experience is available
 
-Your A* implementation treats the map as a binary array. Free or blocked, nothing
-in between. That works in a notebook and it fails on a real robot for a simple
-reason: the robot is not a point.
+**Q-learning** updates a table after observing one transition:
 
-A costmap is a grid where each cell holds a value from 0 to 254 rather than a
-boolean, and it is built from stacked layers, each of which is allowed to modify
-the values written by the layer below it.
+$$Q(s,a)\leftarrow Q(s,a)+\alpha\left[y-Q(s,a)\right],$$
+$$y=r+\gamma(1-d)\max_{a'}Q(s',a').$$
 
-The **static layer** copies the map you saved in Lab 5. This is the layer that
-knows about walls.
+Here $s'$ is the next state; $a'$ ranges over its possible actions; $d$ is 1 for a true terminal transition and 0 otherwise. The target $y$ combines observed reward and an estimate of future return. The difference $y-Q(s,a)$ is the **temporal-difference error**. The learning rate $\alpha$ controls how much of that difference is applied now.
 
-The **obstacle layer** marks cells where the LiDAR currently sees something, and
-clears cells that the LiDAR has raytraced through and found empty. This is the
-layer that knows about the trolley somebody left in the corridor five minutes
-ago.
+For current value 2, reward 1, best next value 4, $\gamma=0.9$ and $\alpha=0.2$, the nonterminal target is 4.6 and the updated entry is $2+0.2(4.6-2)=2.52$. If the transition ends the task, the target is just 1 and the updated entry is 1.8. A terminal goal has no later decision from which to collect another reward.
 
-The **inflation layer** is the interesting one. It takes every lethal cell and
-writes a decaying cost into the cells around it, out to a configured radius. The
-cost at distance $d$ from the nearest obstacle is
+**You write** `q_update` in `starters/lab06/q_update_skeleton.py`. Update exactly the selected table entry in place and return the target. Then make the running experiment use your code:
 
-$$
-c(d) = (\text{cost}_{\text{lethal}} - 1) \cdot e^{-\alpha (d - r_{\text{inscribed}})}
-$$
-
-where $\alpha$ is the cost scaling factor and $r_{\text{inscribed}}$ is the
-inscribed radius of the robot footprint. Every cell within the inscribed radius
-of an obstacle is marked lethal outright, because the robot cannot possibly be
-there.
-
-Two things follow from this and both matter today. First, inflating obstacles by
-the robot radius converts a robot shaped collision problem into a point collision
-problem, which is what makes a point based planner such as your A* usable at all.
-Second, because the cost decays smoothly rather than dropping to zero at the
-boundary, the planner does not merely avoid collisions, it prefers to stay away
-from walls. The strength of that preference is a parameter you control, and you
-will measure its effect in Experiment 6.3.
-
-Choosing an inflation radius is a genuine engineering trade. Too small and the
-robot cuts corners tightly, clips door frames and triggers the collision monitor.
-Too large and narrow doorways fill in completely, the planner reports no valid
-path through a gap the robot would physically fit through, and the robot refuses
-to go somewhere it could easily go. Almost every deployment tuning session
-includes an argument about this number.
-
-![Inflation on a real arena, computed by `grid_tools.inflate`. Black is the obstacle, blue the inflated region.](docs/figures/lab06_inflation.png){width=100%}
-
-
-### 1.3 The local controller
-
-The global planner gives you a path. The path is a sequence of poses, it assumes
-a point robot, and it says nothing about velocity. Converting it into wheel
-commands that respect the robot's acceleration limits while avoiding an obstacle
-that appeared after the plan was made is the local controller's job.
-
-**DWB** is the Nav2 implementation of the dynamic window approach. On each cycle
-it samples a set of constant velocity commands that are reachable within the
-robot's acceleration limits, rolls each forward for a short simulated time, and
-scores the resulting trajectories with a set of weighted critics. The critics in
-your configuration reward staying close to the path, making progress towards the
-goal and finishing with the correct heading, while penalising proximity to
-obstacles and oscillation. The command that scores best is sent.
-
-DWB is transparent, cheap and easy to reason about, which is why it remains the
-default in a great many deployments. Its weakness follows from its assumption:
-because every sampled trajectory holds a constant velocity, it cannot represent a
-manoeuvre that requires changing speed partway through, so it can be poor at
-threading through tight or cluttered spaces.
-
-**MPPI** relaxes that assumption. Model predictive path integral control samples
-whole control sequences rather than single constant commands, rolls each one
-forward through a motion model, scores the trajectories using plugin critics, and
-takes a softmax weighted average of the sampled sequences as its output. Because
-the average is weighted by cost, good samples dominate, and because it samples
-sequences rather than constants it can produce genuinely time varying manoeuvres.
-
-The Nav2 MPPI controller was created by Aleksei Budyakov and adapted and developed for Nav2 by Steve Macenski. It implements the `nav2_core::Controller` interface, which is what allows it to drop into the controller server in place of DWB without any other change. It is worth knowing that the implementation runs on CPU only, using AVX2 vectorisation available on essentially any machine from 2013 onwards. That is why you can run it inside the course virtual machine without a GPU, and it is also a good illustration of how much a well optimised implementation changes what is deployable.
-
----
-
-> ### Industry Perspective
->
-> Nav2 is not a teaching tool that happens to work. It is the navigation stack
-> running on commercial autonomous mobile robots in warehouses, hospitals and
-> factories today, and the design decisions you are looking at were made under
-> commercial pressure.
->
-> The lifecycle management that seems like ceremony exists because a robot that
-> starts navigating before its localisation has converged is dangerous. The
-> behaviour tree exists because the sequence of what to try when navigation fails
-> is application specific and needs to be editable without recompiling. The
-> collision monitor exists as a separate node with its own sensor subscription
-> because a safety stop that depends on the autonomy stack being healthy is not
-> a safety stop.
->
-> The plugin architecture matters commercially too. A company can ship a
-> proprietary planner as a `nav2_core::GlobalPlanner` plugin and keep every other
-> part of the stack, including the tooling, the visualisation and the community
-> maintenance. That is a large part of why Nav2 won.
->
-> One thing to keep in perspective. The Nav2 Collision Monitor is a software
-> safeguard inside the autonomy stack. It is not a safety rated protective device
-> in the sense meant by ISO 3691-4, the standard covering driverless industrial
-> trucks, which requires certified sensing and certified stopping performance
-> independent of the application software. Deployed AMRs carry both. Confusing
-> the two is a mistake with consequences, and you will see it in Lab 7.
-
-> ### Research Frontier
->
-> The architecture you are configuring today splits navigation cleanly into a
-> global planner that is optimal on a known map and a local controller that is
-> reactive but short sighted. That split has a known failure mode. Global
-> planners are brittle when the world contains obstacles that were not in the
-> map, and local controllers handle those well but cannot reason about a goal
-> across a building.
->
-> A current line of work asks whether the local half should be learned. Chandra
-> and colleagues (2024) propose a hybrid planner that detects when the global
-> plan has been obstructed by an unexpected obstacle and switches to a
-> reinforcement learning planner for that stretch, falling back to the classical
-> controller otherwise, and report a 26 percent improvement over either planner
-> used alone on a physical robot. The interesting part is not the number. It is
-> that the switching criterion is a simple geometric test rather than a learned
-> one, which the authors argue explicitly on the grounds that a learned switch
-> inherits the generalisation problems of the thing it is meant to guard.
->
-> Kolomeytsev and colleagues (2025) take the complementary approach, keeping a
-> graph based global planner but feeding its path into a deep reinforcement
-> learning local policy as a sequence of checkpoints encoded in both the
-> observation and the reward, so that the policy retains long range context it
-> would otherwise lack.
->
-> Both papers describe architectures you will be able to build by Lab 10, and one
-> of them is a legitimate choice for your Grand Challenge entry. Read at least
-> the first one before then. Notice while you configure Nav2 today which parts of
-> the stack these approaches keep and which they replace, because that choice is
-> the actual research contribution.
-
----
-
-### Pre-lab quiz
-
-Five questions on the VLE, closing one hour before your session. They cover the
-lifecycle states, what each costmap layer contributes, the effect of the
-inflation radius, the difference between DWB and MPPI sampling, and why Nav2 uses
-an action rather than a topic.
-
----
-
-## In the session
-
-### Stage 0: health check and recap (10 minutes)
-
-```
-course-check
+```bash
+ARC_TABULAR=starters.lab06.q_update_skeleton python3 -m teaching.tabular --method q --episodes 3000 --out results/lab06_student
 ```
 
-If any required check fails, note the incident ID and tell your demonstrator
-before you start. Marks are not lost for failures of the official environment,
-but the incident has to be recorded at the time.
+To compare with the supplied reference, run without the selector:
 
-Then bring up the simulator and the navigation stack:
-
-```
-ros2 launch arc_gazebo simulation.launch.py world:=arc_warehouse
-ros2 launch arc_nav navigation.launch.py map:=$HOME/arc_ws/maps/slam_map.yaml params:=dwb
+```bash
+python3 -m teaching.tabular --method q --episodes 3000 --seed 0 --out results/lab06_q
 ```
 
-**[SCREENSHOT PLACEHOLDER]**
-RViz2 immediately after Nav2 activation, showing the static map, the inflated
-global costmap and the robot model, with the particle cloud from AMCL still
-spread out before the first pose estimate.
-*Instructor note: capture at 1280x720 with the RViz displays panel visible so
-students can see which displays are enabled. Take this before setting the initial
-pose, so the uncertainty in the particle cloud is obvious.*
+This produces `q.npy`, `policy.npy`, `returns.csv`, a learning plot and a replay. NumPy's `.npy` files store arrays; they are generated results, not source files to edit by hand.
 
-### Stage 1: demonstration and the fault (15 minutes)
+## Learning needs exploration
 
-Your demonstrator will run a complete navigation to a goal so that you have seen
-the target behaviour before you try to produce it. Watch the global path appear,
-the local costmap update as the LiDAR sweeps, and the robot follow the path.
+If the agent always chooses its currently highest-valued action, an early mistake can prevent it from discovering a better route. **Epsilon-greedy exploration** chooses a random action with probability $\epsilon$, otherwise the largest current Q value. The code reduces epsilon during training but keeps a small exploratory probability.
 
-Then the demonstrator will break one thing in the configuration and hand the
-system back. Diagnosing it is part of today's exit task. Do not read the
-troubleshooting section yet; try the systematic workflow first.
+Q-learning is **off-policy**: its update targets the greedy next action even while the behaviour used to collect experience is exploratory. This differs from evaluating the exact exploratory behaviour policy.
 
-### Exercise 6.1: sending a goal properly (20 minutes)
+Evaluation uses greedy actions and a separate random-number stream for slips. Do not compare a noisy training return directly with deterministic policy quality. Repeat complete training runs with different seeds to assess variation. More episodes may help, but one successful seed does not establish general reliability.
 
-You can set a goal by clicking in RViz, and you should do that once to confirm
-the stack works. But clicking is not an interface you can benchmark, script or
-build a mission on, so the rest of the course sends goals through the action.
+![The learned grid values and actions can be inspected before using a neural network.](../../figures/nine/lab06_plot.png)
 
-Save the file below as `~/arc_ws/goal_client.py`. `arc_nav` is an `ament_cmake`
-package that installs configuration, launch files and maps but declares no
-Python entry points, so there is no `ros2 run arc_nav goal_client` to reach.
-Running the script directly with `python3` needs no build step and behaves
-identically: `ros2 run` only ever locates an executable for you.
+## A time limit is not always a terminal state
 
-**Code 6.1: Sending a navigation goal through the NavigateToPose action**
+The Q-learning collector stops an attempt after 150 steps to avoid an endless training loop. Here that is an external collection limit. The underlying navigation task could continue, so the final stored transition still bootstraps from its next state. A true goal transition does not bootstrap.
 
-```python
-#!/usr/bin/env python3
-"""Send a single navigation goal to Nav2 and report what happened."""
+Gymnasium later represents this distinction as `terminated` and `truncated`. If a finite deadline is part of the task itself, it belongs in the problem definition, and remaining time may need to be included in the state. Do not blindly set every “episode ended” flag to terminal.
 
-import math
-import sys
+## Connect this to robot software
 
-import rclpy
-from rclpy.action import ActionClient
-from rclpy.node import Node
+RL does not replace ROS messages. ROS carries observations into a policy and carries chosen commands out. In Lab 6 we isolate learning from sensor transport so you can inspect each table entry. Lab 7 introduces continuous robot observations, and Lab 9 connects policies to live ROS topics. Do not publish grid actions as `Twist` values; “north” is a grid transition, not a body-frame wheel command.
 
-from nav2_msgs.action import NavigateToPose
+Your investigation is to vary slip or the movement penalty, retrain, and explain the resulting policy using the objective. A reward is a design choice, not an automatic definition of good behaviour. A robot can earn reward in an unintended way, so report goal completion and failed attempts separately from return.
 
+## Files and reading
 
-class GoalClient(Node):
-    def __init__(self):
-        super().__init__("arc_goal_client")
-        self.client = ActionClient(self, NavigateToPose, "navigate_to_pose")
-        self.recoveries = 0
+| File | Role |
+|---|---|
+| `starters/lab06/q_update_skeleton.py` | Your update implementation |
+| `teaching/tabular.py` | Environment, reference algorithms and experiment driver |
+| `results/lab06_q` | Generated tables, curves, replay and evaluation report |
 
-    def send(self, x, y, yaw=0.0):
-        # The action server does not exist until bt_navigator has been
-        # activated, so waiting here rather than assuming saves a confusing
-        # failure later.
-        if not self.client.wait_for_server(timeout_sec=20.0):
-            self.get_logger().error("navigate_to_pose not available")
-            return False
-
-        goal = NavigateToPose.Goal()
-        goal.pose.header.frame_id = "map"
-        goal.pose.header.stamp = self.get_clock().now().to_msg()
-        goal.pose.pose.position.x = float(x)
-        goal.pose.pose.position.y = float(y)
-        # A yaw of theta is the quaternion (0, 0, sin(theta/2), cos(theta/2)).
-        goal.pose.pose.orientation.z = math.sin(yaw / 2.0)
-        goal.pose.pose.orientation.w = math.cos(yaw / 2.0)
-
-        send_future = self.client.send_goal_async(goal, feedback_callback=self.on_feedback)
-        rclpy.spin_until_future_complete(self, send_future)
-        handle = send_future.result()
-        if not handle.accepted:
-            self.get_logger().error("goal rejected: is it inside the map?")
-            return False
-
-        result_future = handle.get_result_async()
-        rclpy.spin_until_future_complete(self, result_future)
-        status = result_future.result().status
-        self.get_logger().info(f"finished with status {status} "
-                               f"after {self.recoveries} recovery behaviours")
-        return status == 4  # STATUS_SUCCEEDED
-
-    def on_feedback(self, msg):
-        self.recoveries = msg.feedback.number_of_recoveries
-
-
-def main():
-    rclpy.init()
-    node = GoalClient()
-    x, y = float(sys.argv[1]), float(sys.argv[2])
-    ok = node.send(x, y)
-    node.destroy_node()
-    rclpy.shutdown()
-    sys.exit(0 if ok else 1)
-
-
-if __name__ == "__main__":
-    main()
-```
-
-Three parts of this are worth attention.
-
-The wait for the action server is not defensive programming for its own sake. The
-server genuinely does not exist until `bt_navigator` reaches the active state, so
-a script that assumes it is there will fail in a way that looks like a Nav2
-problem rather than a startup ordering problem.
-
-The feedback callback captures `number_of_recoveries`. This single number is the
-most useful diagnostic Nav2 gives you for free. A run that succeeded after four
-recoveries and a run that succeeded after none are not the same result, and if
-you only look at success you will never see the difference. It is one of the
-metrics the evaluation harness records.
-
-The exit code matters because it makes the script usable from a test or a
-benchmark rather than only from a terminal.
-
-Run it, with ROS 2 sourced in the same terminal:
-
-```
-python3 ~/arc_ws/goal_client.py 4.5 2.0
-```
-
-**[GIF PLACEHOLDER]**
-The robot navigating from its start pose to (4.5, 2.0), with the global path in
-green and the local trajectory candidates visible.
-*Instructor note: record roughly 15 seconds at 10 fps. Enable the DWB trajectory
-visualisation display in RViz first, since the fan of candidate trajectories is
-the clearest available picture of what a sampling controller does.*
-
-### Exercise 6.2: your A* on the real map (20 minutes)
-
-Nav2's `NavfnPlanner` implements Dijkstra by default, and setting `use_astar` to
-true selects the A* variant. You have written both. Now compare them on the same
-map.
-
-The costmap is published as a `nav_msgs/OccupancyGrid` on
-`/global_costmap/costmap`. `starters/lab06/grid_tools.py` is the conversion,
-and `starters/lab06/grid_tools_skeleton.py` is the version you complete.
-
-It has seven TODOs across `to_binary_obstacle_map`, `inflate` and
-`path_length_m`. The dataclass,
-`occupancy_to_numpy` and the two coordinate conversions are given and the tests
-depend on them staying that way. Do this before you touch the robot, because a
-transposed grid or a wrapped inflation disc is far easier to find in a test than
-in RViz.
-
-```
-cd ~/arc_ws/src/arc-course
-ARC_GRID_TOOLS=grid_tools_skeleton python3 -m pytest starters/lab06 -q
-```
-
-Run it without the variable to check the same tests against the reference
-implementation:
-
-```
-python3 -m pytest starters/lab06 -q
-```
-
-Save the next listing as `~/arc_ws/costmap_io.py`. Code 6.3 imports
-`fetch_costmap` from it, so it has to be a real file rather than something you
-paste into a shell.
-
-**Code 6.2: `~/arc_ws/costmap_io.py`, converting the published global costmap into a NumPy grid**
-
-```python
-import sys
-from pathlib import Path
-
-import numpy as np
-import rclpy
-from rclpy.node import Node
-from rclpy.qos import QoSDurabilityPolicy, QoSProfile, QoSReliabilityPolicy
-from nav_msgs.msg import OccupancyGrid
-
-# grid_tools lives in the course checkout, which is not on the default path.
-sys.path.insert(0, str(Path.home() / "arc_ws/src/arc-course/starters/lab06"))
-
-from grid_tools import occupancy_to_numpy, to_binary_obstacle_map, world_to_grid
-
-# The costmap is latched, published once with transient local durability. A
-# subscriber using the default volatile QoS connects successfully and then waits
-# forever for a message that was already sent.
-MAP_QOS = QoSProfile(
-    reliability=QoSReliabilityPolicy.RELIABLE,
-    durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
-    depth=1,
-)
-
-
-class CostmapGrabber(Node):
-    def __init__(self):
-        super().__init__("arc_costmap_grabber")
-        self.grid = None
-        self.info = None
-        self.create_subscription(OccupancyGrid, "/global_costmap/costmap",
-                                 self.on_map, MAP_QOS)
-
-    def on_map(self, msg):
-        self.grid, self.info = occupancy_to_numpy(msg)
-        self.get_logger().info(
-            f"received {self.info.width} x {self.info.height} cells "
-            f"at {self.info.resolution} m/cell")
-
-
-def fetch_costmap(timeout_s=10.0):
-    node = CostmapGrabber()
-    deadline = node.get_clock().now().nanoseconds + int(timeout_s * 1e9)
-    while node.grid is None and node.get_clock().now().nanoseconds < deadline:
-        rclpy.spin_once(node, timeout_sec=0.2)
-    grid, info = node.grid, node.info
-    node.destroy_node()
-    if grid is None:
-        raise RuntimeError("no costmap received; check the QoS and that Nav2 is active")
-    return grid, info
-```
-
-The QoS profile in this cell is the point of the exercise. The costmap is
-published once with transient local durability so that late subscribers still
-receive it. A subscriber using the default settings will connect, report no
-errors, and receive nothing at all. This is the same class of mistake as the
-LaserScan reliability problem from Lab 1, and it will happen to you again in your
-project, so it is worth recognising the symptom: a subscription that exists,
-reports a publisher, and never fires its callback.
-
-Now plan on it with your own implementation.
-
-Save this one as `~/arc_ws/plan_on_costmap.py`, next to `costmap_io.py`.
-
-**Code 6.3: Planning with your A* and comparing against Nav2's path**
-
-```python
-import sys
-from pathlib import Path
-
-import numpy as np
-import rclpy
-
-COURSE = Path.home() / "arc_ws/src/arc-course/starters"
-sys.path.insert(0, str(COURSE / "lab06"))        # grid_tools
-sys.path.insert(0, str(COURSE / "algorithms"))   # planners, and the gridmap it imports
-
-from costmap_io import fetch_costmap            # Code 6.2, saved next to this file
-from grid_tools import (to_binary_obstacle_map, inflate,
-                        world_to_grid, grid_to_world, path_length_m)
-from planners import astar                      # the planning notebook A*, reference version
-
-rclpy.init()
-grid, info = fetch_costmap()
-
-# Nav2 has already inflated this costmap, so values above the threshold include
-# both real obstacles and the inflated region around them. Planning on the
-# inflated map is what makes a point based planner safe for a robot with size.
-#
-# The costmap is rescaled to 0 to 100 on the way out: lethal becomes 100, the
-# inscribed ring becomes 99, unknown becomes -1, and the inflated gradient is
-# squeezed into 1 to 98. The 253 you may have read about is the internal scale
-# and never appears on the topic, so a threshold of 253 matches nothing and your
-# A* plans straight through walls. 65 is the default in grid_tools and keeps
-# most of the inflated band.
-obstacles = to_binary_obstacle_map(grid, occupied_threshold=65,
-                                   unknown_is_obstacle=False)
-
-start = world_to_grid(0.0, 0.0, info)
-goal = world_to_grid(4.5, 2.0, info)
-
-# astar returns a PlanResult, not a tuple. Check `found` before trusting `path`:
-# an empty path and a failed search are different outcomes.
-result = astar(obstacles, start, goal)
-if not result.found:
-    raise SystemExit("no path; is the goal inside inflated space?")
-print(f"A*: {len(result.path)} cells, {result.expanded} nodes expanded, "
-      f"{path_length_m(result.path, info):.2f} m")
-
-rclpy.shutdown()
-```
-
-Once you have completed `planners_skeleton.py`, change that import to
-`from planners_skeleton import astar` and run it again. The numbers should
-match. If they do not, the tests in `starters/algorithms/tests` will tell you
-where faster than the robot will.
-
-Compare three numbers against the path Nav2 produced for the same goal, which you
-can measure by echoing `/plan`:
-
-| Planner | Path length (m) | Nodes expanded | Minimum distance to an obstacle (m) |
-|---------|-----------------|----------------|--------------------------------------|
-| Your A*, uninflated map | | | |
-| Your A*, Nav2 costmap | | | |
-| NavFn (Dijkstra) | | not reported | |
-| NavFn (`use_astar: true`) | | not reported | |
-
-Your A* on the raw binary map will produce the shortest path and it will run
-along the walls, because nothing in your cost function discourages that. Planning
-on the inflated costmap moves it away from the walls without you changing a line
-of your planner. That is the whole idea of the inflation layer, and seeing it
-happen to your own code is more convincing than reading about it.
-
-**[SCREENSHOT PLACEHOLDER]**
-RViz showing your A* path and the Nav2 `/plan` overlaid on the inflated global
-costmap.
-*Instructor note: publish the student path as a `nav_msgs/Path` on `/my_plan` and
-add both Path displays in different colours. The corner cutting difference near
-walls should be clearly visible, so choose a goal that requires a corner.*
-
-### Experiment 6.3: what the inflation radius actually does (15 minutes)
-
-`arc_nav/config/nav2_dwb.yaml` sets `inflation_radius` twice, once under
-`local_costmap` and once under `global_costmap`. They do different jobs. The
-local one shapes the costmap the controller samples against, so it changes how
-closely the robot is willing to pass an obstacle it can see right now. The
-global one shapes the map the planner searches, so it changes the route. This
-experiment is about the route, so change the value under **`global_costmap`**
-and leave the local one at 0.55.
-
-Re-run the same goal three times, once at each value, and measure the global
-plan on `/plan`.
-
-| `global_costmap` `inflation_radius` | Path length (m) | Minimum clearance (m) | Navigation time (s) |
-|-------------------------------------|-----------------|------------------------|---------------------|
-| 0.25 | | | |
-| 0.55 | | | |
-| 0.90 | | | |
-
-NavFn will find a path at all three. That is not the experiment failing, and it
-is the first thing to understand here. Inflation writes *lethal* cost only out
-to the inscribed radius, which is `robot_radius`, 0.22 m. Beyond that it writes
-a decaying cost, and NavFn treats only the lethal value 254 as blocked. So
-raising `inflation_radius` to 0.90 makes the doorway expensive, not closed, and
-the planner still goes through it. What moves is the clearance and the length:
-the route is pushed towards the centre of free space and gets longer.
-
-Now do the same three costmaps through your own planner. Re-run Code 6.3 at each
-radius, with `occupied_threshold=65` as printed.
-
-| `global_costmap` `inflation_radius` | Your A* path found? | Your A* length (m) |
-|-------------------------------------|---------------------|---------------------|
-| 0.25 | | |
-| 0.55 | | |
-| 0.90 | | |
-
-Your A* does close the doorway, because a threshold of 65 treats the inflated
-band as solid rather than as expensive. The map and the geometry are the same in
-both cases. The only difference is where the line was drawn between cost and
-obstacle.
-
-Then answer two questions in your exit task. Nav2 and your A* disagree about
-whether the 1.2 m doorway is passable at `inflation_radius: 0.90`; explain which
-one is right for a robot of radius 0.22 m, and what you would have to change in
-the other to make it agree. What would you set for a robot delivering medication
-in a hospital corridor, and what would you set for a robot moving pallets in a
-warehouse aisle at night, and why are those answers different?
-
-### Exercise 6.4: a seeded controller comparison (20 minutes)
-
-You now have a working navigation system, so the interesting question is no
-longer whether it works but how well, and compared to what.
-
-Run the benchmark against both controller configurations. The harness runs the
-same mission from the same seeded start conditions for each system and reports
-aggregate statistics.
-
-**Code 6.4: Benchmark configuration for the DWB baseline**
-
-```yaml
-# arc_eval/configs/lab06_dwb.yaml
-system_label: nav2_dwb
-scenario: lab05_map_missions
-env_factory: arc_eval.ros_nav2_env:make_nav2_env
-env_args:
-  goals: [[4.5, 2.0, 0.0], [1.0, 5.5, 1.57], [8.0, 6.0, 0.0]]
-  system_label: nav2_dwb
-  time_limit_s: 120.0
-policy_factory: arc_eval.ros_nav2_env:make_nav2_policy
-seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
-max_steps: 4000
-out: results/lab06_dwb.json
-```
-
-The goals are in the `map` frame, whose origin is the spawn pose at world
-(1, 1), so the mapped arena runs from about -1 to 11 on both axes. The first two
-goals stay in the western half. The third, at map (8.0, 6.0), is world (9.0,
-7.0) in the eastern half, which means every run has to pass through the 1.2 m
-partition doorway. That is the part of the mission where the two controllers
-differ, so a benchmark that never crosses it is not measuring much. The point is
-at least 2 m clear of the partition, the east wall and both eastern pillars, so
-it is reachable on every seed.
-
-```
-python3 -m arc_eval.runner --config arc_eval/configs/lab06_dwb.yaml
-# restart Nav2 with params:=mppi, then
-python3 -m arc_eval.runner --config arc_eval/configs/lab06_mppi.yaml
-python3 -m arc_eval.runner --compare results/lab06_dwb.json results/lab06_mppi.json
-```
-
-Record the comparison:
-
-| Metric | DWB | MPPI |
-|--------|-----|------|
-| Success rate (with 95% interval) | | |
-| Collision free rate | | |
-| Navigation time, mean and SD (s) | | |
-| Path length, mean and SD (m) | | |
-| Minimum clearance, mean (m) | | |
-| Recovery behaviours per run | | |
-
-One rule applies to every comparison you make for the rest of this course. If the
-difference between two systems is smaller than the standard deviation of either,
-you have not measured a difference, you have measured noise. Reporting that
-honestly earns full marks for method. Reporting a 4 percent improvement from ten
-runs as though it were a result does not.
-
-Ten seeds is enough to see a large effect and not enough to see a small one. For
-your project claims you will use thirty.
-
-### Exit task (8 minutes)
-
-Commit and push, then submit on the VLE:
-
-1. `goal_client.py`, working.
-2. Your filled planner comparison table and inflation table.
-3. The two benchmark JSON files and the comparison output.
-4. Two or three sentences identifying the fault your demonstrator introduced in
-   Stage 1, the command that revealed it, and what the symptom was.
-
-Nothing counts as submitted until it appears on your remote. The virtual machine
-does not survive the end of the session.
-
----
-
-## Troubleshooting
-
-Work through this in order rather than jumping to the item that sounds like your
-problem. The order is the diagnostic workflow, and the point of the workflow is
-that it works even when you have no idea what is wrong.
-
-**Nothing happens when I send a goal.**
-
-Check the lifecycle state before anything else.
-
-```
-ros2 lifecycle get /bt_navigator
-ros2 lifecycle get /controller_server
-```
-
-If these are not `active`, the lifecycle manager did not complete. Look at the
-launch output for the first node that failed, not the last error printed.
-
-**The action server is not available.**
-
-```
-ros2 action list
-ros2 action info /navigate_to_pose -t
-```
-
-If the action is absent, `bt_navigator` is not active. If it is present but your
-client times out, you probably have a `ROS_DOMAIN_ID` mismatch between terminals.
-
-**The robot plans a path but does not move.**
-
-Follow the velocity chain. Nav2 publishes to `cmd_vel_smoothed`, the collision
-monitor forwards it to `cmd_vel`, and the controller consumes that.
-
-```
-ros2 topic hz /cmd_vel_smoothed --window 50
-ros2 topic hz /cmd_vel --window 50
-ros2 control list_controllers
-```
-
-`ros2 topic hz` prints a running average and its first line is the least
-trustworthy one: it covers the shortest window and it lands while processes are
-still starting, so a busy moment reads as a slow topic. On a machine where a
-settled measurement gives 49.7 Hz the first line has been seen to report 33 Hz.
-Let it run for ten seconds or so and read the last report, not the first.
-
-If `cmd_vel_smoothed` is publishing and `cmd_vel` is not, the collision monitor
-is stopping you, which means it believes something is inside its stop polygon.
-If both are publishing and the robot is still stationary, the controller is not
-active.
-
-**The costmap is empty or the robot sees nothing.**
-
-```
-ros2 topic hz /scan --window 50
-ros2 topic info /scan --verbose
-ros2 run tf2_ros tf2_echo base_footprint laser_link
-```
-
-An empty costmap with a healthy `/scan` is nearly always a frame problem. The
-`frame_id` in the scan message has to match a frame in the TF tree, and the
-costmap has to be able to transform from that frame to its own global frame.
-
-**Planning fails with "no valid path".**
-
-Either the goal is inside inflated space, or the corridor between you and it has
-been inflated closed. Reduce `inflation_radius` temporarily to test which. If a
-smaller radius finds a path, the geometry was the problem rather than the goal.
-
-**The TF tree looks wrong.**
-
-```
-ros2 run tf2_tools view_frames
-```
-
-You should see `map` to `odom` published by AMCL, `odom` to `base_footprint`
-published by the diff drive controller, and the fixed sensor joints published by
-`robot_state_publisher`. Two publishers for the same transform is a common and
-confusing failure, and it usually means something was launched twice.
-
----
-
-## Connection to Lab 7
-
-You now have a navigation system that works. Today it worked because the
-environment cooperated, and that is the part worth being suspicious about.
-
-Try this before you leave if you have time. Send a goal, then place an obstacle
-directly on the path once the robot has committed to it. Nav2 will replan, and
-depending on where you put the obstacle it may also spin, back up or give up
-entirely. The behaviour you see is not hard coded. It is a behaviour tree, and
-`bt_navigator` is executing it.
-
-Next week you take that tree apart. You will look at why navigation fails, what
-the recovery behaviours actually do, how the collision monitor decides to stop,
-and how to modify the tree so that the robot handles a blocked corridor the way
-your application needs rather than the way the default assumes. You will be given
-a deliberately fragile robot and asked to make it robust, which is a fair
-description of most of the work in deployed robotics.
-
----
-
-## References
-
-**Textbooks**
-
-Thrun, S., Burgard, W. and Fox, D. (2005). *Probabilistic Robotics*. MIT Press.
-Chapter 9 covers occupancy grid mapping and gives the probabilistic account of
-what a costmap is approximating.
-
-Lynch, K. M. and Park, F. C. (2017). *Modern Robotics: Mechanics, Planning, and
-Control*. Cambridge University Press. Chapter 10 covers motion planning,
-including the configuration space argument that underlies obstacle inflation.
-
-Macenski, S., Martín, F. and Ginés, J. (2022). *A Concise Introduction to Robot
-Programming with ROS 2*. CRC Press. Written by Nav2 maintainers and the most
-direct treatment of the material in this lab.
-
-**Official documentation**
-
-Nav2 documentation, Jazzy: https://docs.nav2.org
-Configuration guides for `nav2_costmap_2d`, `dwb_core` and `nav2_mppi_controller`
-are the authoritative parameter references and should be your first stop before
-searching elsewhere.
-
-ROS 2 Jazzy documentation: https://docs.ros.org/en/jazzy
-Managed node lifecycle and QoS settings.
-
-**Repositories**
-
-`ros-navigation/navigation2` on GitHub. The `nav2_mppi_controller` README
-documents every critic and its weight, and reading the critic source is the
-fastest way to understand what the controller is actually optimising.
-
-**Papers**
-
-Macenski, S., Martín, F., White, R. and Clavero, J. G. (2020). The Marathon 2: A
-Navigation System. *IEEE/RSJ International Conference on Intelligent Robots and
-Systems (IROS)*. arXiv:2003.00368.
-The paper that introduced Nav2 and explains the architectural decisions behind
-the server split and the behaviour tree. Read it to understand why the system is
-shaped the way it is rather than what its parameters do.
-
-Macenski, S., Moore, T., Lu, D. V., Merzlyakov, A. and Ferguson, M. (2023). From
-the desks of ROS maintainers: A survey of modern and capable mobile robotics
-algorithms in the field of Robotics and Autonomous Systems. *Robotics and
-Autonomous Systems*, 168.
-A maintainer's comparison of the available planners and controllers with
-recommendations about which to use in which application. The most useful single
-document for choosing a Nav2 configuration.
-
-Williams, G., Aldrich, A. and Theodorou, E. A. (2017). Model Predictive Path
-Integral Control: From Theory to Parallel Computation. *Journal of Guidance,
-Control, and Dynamics*, 40(2).
-The theoretical basis of the MPPI controller. Section 2 is enough to understand
-where the softmax weighting comes from.
-
-Chandra, R. et al. (2024). Hybrid Classical/RL Local Planner for Ground Robot
-Navigation. arXiv:2410.03066.
-The hybrid architecture discussed in the Research Frontier box. Relevant to your
-Grand Challenge entry and short enough to read properly.
-
-Kolomeytsev, Y. et al. (2025). Hybrid Motion Planning with Deep Reinforcement
-Learning for Mobile Robot Navigation. arXiv:2512.24651.
-Global graph planner feeding checkpoints into a DRL local policy. The
-complementary approach to the previous paper.
-
-**Video**
-
-Macenski, S. Nav2 design and architecture, ROSCon FR 2023. Motivates the Nav2
-architecture from ROS 2 and mobile robotics design principles, and covers in
-thirty minutes what would otherwise take a long time to assemble from
-documentation.
-
-## Further reading
-
-`docs/references.md` has a fuller list under **Lab 6. The Nav2 navigation
-stack**, with the papers, the industry write-ups and the Nav2 documentation
-pages separated. If you read one thing from it, make it the Macenski et al.
-2023 survey: it covers every planner and controller in this lab, including the
-ones you did not run, and it is written by the people who maintain them. The
-**Lessons Learned from The 2nd BARN Challenge** paper in the same section is the
-honest companion to Exercise 6.4, because it reports how much on-site tuning a
-head-to-head navigation comparison still needed.
+- Sutton and Barto, *Reinforcement Learning: An Introduction*, second edition, Chapters 3, 4 and 6. [Author's book page](https://incompleteideas.net/book/the-book-2nd.html).
+- [Gymnasium: handling time limits](https://gymnasium.farama.org/main/tutorials/handling_time_limits/) explains why terminal transitions and external truncations need different targets.

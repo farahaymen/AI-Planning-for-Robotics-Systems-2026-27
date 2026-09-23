@@ -24,8 +24,12 @@ import argparse
 import importlib
 import sys
 
-from gridmap import (GOAL, MAPS, MOVES_4, MOVES_8, SOLVABLE, START,
-                     is_valid_path, render)
+try:
+    from .gridmap import (GOAL, MAPS, MOVES_4, MOVES_8, SOLVABLE, START,
+                         is_valid_path, render)
+except ImportError:  # Standalone exercise.
+    from gridmap import (GOAL, MAPS, MOVES_4, MOVES_8, SOLVABLE, START,
+                         is_valid_path, render)
 
 HEADER = (f"{'planner':22s} {'length':>8s} {'steps':>6s} {'excess':>8s} "
           f"{'expanded':>9s} {'frontier':>9s} {'ms':>8s}")

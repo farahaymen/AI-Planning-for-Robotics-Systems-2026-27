@@ -1,0 +1,12 @@
+# EXPERIMENTAL: reset adapter is incomplete. Not used by the nine labs.
+system_label: nav2_dwb
+scenario: lab05_map_missions
+env_factory: arc_eval.ros_nav2_env:make_nav2_env
+env_args:
+  goals: [[4.5, 2.0, 0.0], [1.0, 5.5, 1.57], [8.0, 6.0, 0.0]]
+  system_label: nav2_dwb
+  time_limit_s: 120.0
+policy_factory: arc_eval.ros_nav2_env:make_nav2_policy
+seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+max_steps: 4000
+out: results/lab06_dwb.json

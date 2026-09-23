@@ -1,0 +1,10 @@
+{
+  "method": "dqn",
+  "seed": 0,
+  "environment_steps": 300,
+  "gradient_updates": 11,
+  "training_layouts": "0..99",
+  "validation_layouts": "500..509",
+  "test_layouts": "1000..1009",
+  "warning": "A saved checkpoint is not evidence of successful navigation."
+}

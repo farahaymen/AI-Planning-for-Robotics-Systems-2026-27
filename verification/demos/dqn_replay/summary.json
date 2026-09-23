@@ -1,0 +1,14 @@
+{
+  "environment": "FastNavEnv (NumPy surrogate, not Gazebo)",
+  "model": "verification/demos/dqn_smoke/policy.pt",
+  "seeds": [
+    500
+  ],
+  "episodes": 1,
+  "collision_free_successes": 0,
+  "collisions": 0,
+  "timeouts": 1,
+  "noise_std_m": 0.01,
+  "observation_delay_steps": 0,
+  "delay_scope": "all policy observations delayed; hybrid position is current simulator state"
+}

@@ -8,7 +8,8 @@ PID is an error controller: measure how wrong you are, multiply by gains, drive
 the error to zero. Pure Pursuit is geometric: pick a point on the path ahead of
 the robot, work out the arc that reaches it, drive that arc.
 
-Nav2 ships Regulated Pure Pursuit, which is this with speed limits added.
+Nav2 Regulated Pure Pursuit adds path handling, collision checking and regulation.
+This implementation demonstrates the basic geometry only.
 
 Reference implementation. The version you fill in is `control_skeleton.py`.
 """
@@ -20,7 +21,10 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from motion import ROBOT, Pose, wrap_angle
+try:
+    from .motion import ROBOT, Pose, wrap_angle
+except ImportError:  # Standalone exercise.
+    from motion import ROBOT, Pose, wrap_angle
 
 
 # ---------------------------------------------------------------------------
@@ -71,7 +75,10 @@ class PID:
         # undefined. Using zero rather than the error itself avoids a large
         # spurious kick on the first control cycle, which on a real robot is a
         # visible lurch.
-        derivative = 0.0 if self._previous is None else (error - self._previous) / self.dt
+        difference = 0.0 if self._previous is None else error - self._previous
+        if self.wrap:
+            difference = wrap_angle(difference)
+        derivative = difference / self.dt
         self._previous = error
 
         output = self.kp * error + self.ki * self._integral + self.kd * derivative
@@ -89,8 +96,8 @@ def make_heading_controller(kp: float = 2.5, ki: float = 0.0, kd: float = 0.15,
     `slow_on_turn` is worth understanding rather than copying. Without it the
     robot drives at full speed while still turning hard, so it swings wide and
     arrives from the wrong side. Scaling the forward speed by how well aligned
-    the robot is costs one line and removes the behaviour entirely. Nav2's
-    Regulated Pure Pursuit does the same thing and calls it a regulation
+    the robot is costs one line and reduces this behaviour. Nav2's
+    Regulated Pure Pursuit has a more complete regulation system and calls it a regulation
     heuristic.
     """
     pid = PID(kp=kp, ki=ki, kd=kd)

@@ -1,0 +1,13 @@
+{
+  "algorithm": "astar",
+  "controller": "pursuit",
+  "expanded": 1372,
+  "goal_error_m": 0.14655122762170872,
+  "resolution": 0.1,
+  "origin": [
+    0.0,
+    0.0,
+    0.0
+  ],
+  "environment": "kinematic teaching simulation"
+}

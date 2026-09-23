@@ -59,7 +59,7 @@ def integrate_pose(x: float, y: float, theta: float,
 def odometry_scale_error(assumed_radius: float, true_radius: float) -> float:
     """Ratio of reported distance to actual distance for a wheel radius error.
 
-    Exercise 2.4 asks you to predict this number before measuring it. If the
+    Lab 2's optional calibration investigation predicts this number. If the
     controller believes the wheels are larger than they are, it reports having
     travelled further than it did, and every downstream consumer inherits the
     error: the costmap, AMCL, and eventually your Nav2 goal tolerance.

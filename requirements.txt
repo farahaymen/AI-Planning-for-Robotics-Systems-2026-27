@@ -1,0 +1,8 @@
+# Install CPU PyTorch separately; see README. Preserve ROS-compatible NumPy.
+numpy>=1.26,<2
+matplotlib>=3.6
+PyYAML>=6
+Pillow>=9
+pytest>=7
+gymnasium>=1.0,<2
+stable-baselines3>=2.3,<3

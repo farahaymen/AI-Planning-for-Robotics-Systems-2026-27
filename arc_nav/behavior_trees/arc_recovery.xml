@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
-<!-- Lab 7, Code 7.1. Point bt_navigator here, then deactivate and reactivate it:
-     the tree is loaded on configuration, so setting the parameter alone changes
-     nothing. -->
+<!-- Optional Lab 5 recovery example. The default navigation YAML does not
+     select this tree. An integration exercise must explicitly select its
+     absolute path and verify successful loading in the navigator logs. -->
 <root main_tree_to_execute="MainTree">
   <BehaviorTree ID="MainTree">
     <RecoveryNode number_of_retries="6" name="NavigateRecovery">

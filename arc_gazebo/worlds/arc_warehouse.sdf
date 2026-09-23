@@ -60,7 +60,7 @@
       </link>
     </model>
 
-    <!-- A partition with a 1.2 m doorway. Lab 6 plans through this gap, and it
+    <!-- A partition with a 1.2 m doorway. Lab 5 plans through this gap, and it
          is the one that closes when the inflation radius is set too large. -->
     <model name="partition">
       <static>true</static>

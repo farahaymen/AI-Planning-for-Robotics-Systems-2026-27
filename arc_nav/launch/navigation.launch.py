@@ -5,7 +5,7 @@ Bring up the ARC navigation stack.
   ros2 launch arc_nav navigation.launch.py map:=/path/to/map.yaml params:=mppi
 
 The params argument selects between the two controller baselines compared in
-Lab 6. Everything else about the two configurations is identical, which is what
+Lab 5. Everything else about the two configurations is identical, which is what
 makes the comparison a single-variable one.
 """
 

@@ -2,7 +2,7 @@
 #
 # Baseline A (arc_nav/config/nav2_dwb.yaml) is identical except for the
 # controller_server FollowPath block. Run `diff` between the two files before you
-# change anything, so that your Lab 6 comparison isolates one variable.
+# change anything, so that your Lab 5 comparison isolates one variable.
 #
 # Robot constants appear in three places in this file: the footprint, the
 # velocity limits and the collision monitor. They must agree with the URDF.

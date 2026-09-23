@@ -2,7 +2,7 @@
 """
 arc-drive - drive the robot around a building on its own, so it can be mapped.
 
-Saves a Lab 5 session from fifteen minutes of teleop per student.
+Optional autonomous wandering helper for Lab 3 mapping. It does not guarantee coverage.
 
     arc-drive                      wander until stopped with Ctrl-C
     arc-drive --for 300            wander for five minutes, then stop
@@ -10,13 +10,13 @@ Saves a Lab 5 session from fifteen minutes of teleop per student.
     arc-drive --dry-run            print what it would command, publish nothing
 
 It runs the follow-the-gap controller from Lab 4 inside the emergency brake
-from Lab 3, both imported from `starters/algorithms` unchanged. This file is
+from the reactive extension, both imported from `starters/algorithms` unchanged. This file is
 only the ROS plumbing: LaserScan in, Twist out. Point ARC_REACTIVE at your own
 file to drive with your own controller.
 
 Gap following has no memory, so it will re-enter a dead end it has already
-visited and it never knows when it has finished. Frontier exploration in Lab 7
-is the fix.
+visited and it never knows when it has finished. Frontier selection in Lab 4 is one component of a complete exploration system;
+that system also needs planning, tracking and failure handling.
 
 The brake sits between the controller and the wheels and can only reduce speed.
 If scans stop for more than half a second the node commands zero.

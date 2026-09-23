@@ -34,8 +34,14 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from gridmap import MOVES_8
-from planners import astar, octile
+try:
+    from .gridmap import MOVES_8
+except ImportError:  # Standalone exercise.
+    from gridmap import MOVES_8
+try:
+    from .planners import astar, octile
+except ImportError:  # Standalone exercise.
+    from planners import astar, octile
 
 Cell = tuple[int, int]
 

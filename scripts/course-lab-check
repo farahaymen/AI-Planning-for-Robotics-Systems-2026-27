@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Run the maintained offline checks, then the ROS environment/movement gate.
+# Use --offline outside the provisioned VM. Results are kept under ~/arc_ws/.arc.
+set -euo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+MODE="${1:-}"
+if [[ "$MODE" != "" && "$MODE" != "--offline" ]]; then
+  echo 'usage: bash scripts/course-lab-check [--offline]' >&2
+  exit 2
+fi
+cd "$ROOT"
+mkdir -p "$HOME/arc_ws/.arc"
+python3 -m pytest starters arc_eval teaching/tests -q | tee "$HOME/arc_ws/.arc/nine-labs-offline.log"
+if [[ "$MODE" == "--offline" ]]; then
+  echo 'Offline checks passed. ROS/Gazebo acceptance has not been run.'
+  exit 0
+fi
+if [[ ! -f /opt/ros/jazzy/setup.bash || ! -f "$HOME/arc_ws/install/setup.bash" ]]; then
+  echo 'ROS workspace is unavailable. Build in the course VM before runtime acceptance.' >&2
+  exit 1
+fi
+set +u
+source /opt/ros/jazzy/setup.bash
+source "$HOME/arc_ws/install/setup.bash"
+set -u
+course-check | tee "$HOME/arc_ws/.arc/nine-labs-environment.log"
+course-smoke-test --headless | tee "$HOME/arc_ws/.arc/nine-labs-motion.log"
+echo 'Base simulation gate passed. Complete the SLAM/Nav2/policy acceptance checks in verification/README.md.'

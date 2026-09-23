@@ -1,17 +1,17 @@
 """
-Lab 1: predicting QoS compatibility before you run anything.
+Optional QoS compatibility model, revisited with sensor delivery in Lab 3.
 
-A QoS mismatch in ROS 2 does not raise an error. The subscription is created, it
-reports a matching publisher count of zero, and it never fires. Because there is
-no failure message, the only way to find these quickly is to understand the rule
-and check it deliberately.
+A QoS mismatch can leave discovered endpoints unable to exchange data.
+Middleware may report a warning. Inspect both endpoint policies and actual
+delivery instead of treating discovery alone as a successful connection.
 
 The rule is one sentence: the publisher must OFFER at least as strong a
 guarantee as the subscriber REQUESTS. Everything below is that sentence applied
 to each policy in turn.
 
-You will use this to predict the outcome of Exercise 1.2 before running it, then
-check your prediction against `ros2 topic info /topic --verbose`.
+The file remains in lab01 for compatibility with existing imports/tests. The
+beginner Lab 1 uses a topic-name mismatch; this model is an optional later
+investigation alongside `ros2 topic info /topic --verbose`.
 """
 
 from __future__ import annotations

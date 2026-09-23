@@ -2,7 +2,7 @@
 
     ros2 launch arc_gazebo simulation.launch.py
     ros2 launch arc_gazebo simulation.launch.py headless:=true     # graphics Tier B
-    ros2 launch arc_gazebo simulation.launch.py world:=broken_a    # Lab 3 fault
+    ros2 launch arc_gazebo simulation.launch.py world:=broken_a    # Lab 2 fault
     ros2 launch arc_gazebo simulation.launch.py render_engine:=ogre    # diagnosis only
 
 The broken_* worlds are the standard warehouse with a deliberate SENSOR fault,

@@ -1,0 +1,5 @@
+{
+  "scans": 120,
+  "pose_source": "exact prescribed trajectory",
+  "slam": false
+}

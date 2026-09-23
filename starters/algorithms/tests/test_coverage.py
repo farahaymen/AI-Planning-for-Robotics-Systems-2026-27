@@ -12,6 +12,7 @@ planner at all.
 from __future__ import annotations
 
 import importlib
+import importlib.util
 import os
 import sys
 from pathlib import Path
@@ -23,16 +24,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from gridmap import empty_room
 
-from importlib.util import module_from_spec, spec_from_file_location
-
 selected_module = os.environ.get("ARC_COVERAGE", "coverage")
 if selected_module == "coverage":
-    # Load the lab file explicitly; a test plugin may have loaded another coverage module.
+    # Pytest plugins may already have loaded the unrelated coverage package.
+    # Load the lab implementation by file, under a distinct module name.
     coverage_file = Path(__file__).resolve().parents[1] / "coverage.py"
-    spec = spec_from_file_location("arc_course_coverage", coverage_file)
+    spec = importlib.util.spec_from_file_location("arc_course_coverage", coverage_file)
     if spec is None or spec.loader is None:
         raise ImportError(f"Cannot load the lab coverage module: {coverage_file}")
-    V = module_from_spec(spec)
+    V = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = V
     spec.loader.exec_module(V)
 else:

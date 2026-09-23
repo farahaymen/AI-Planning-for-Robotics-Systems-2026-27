@@ -1,0 +1,1186 @@
+<span class="anchor-alias" id="ros_toolkit-diagnose-the-stage-that-failed"></span><span class="anchor-alias" id="ros_toolkit-frames-time-and-recordings"></span><span class="anchor-alias" id="ros_toolkit-add-a-program-then-build-and-test-it"></span><span class="anchor-alias" id="ros_toolkit-parameters-remapping-and-namespaces"></span><span class="anchor-alias" id="ros_toolkit-choose-the-interface-that-fits-the-interaction"></span><span class="anchor-alias" id="ros_toolkit-discover-first-then-inspect-values"></span><span class="anchor-alias" id="ros_toolkit-prepare-a-terminal-then-ask-for-help"></span><span class="anchor-alias" id="ros_toolkit-ros-2-commands-you-can-use-in-your-own-projects"></span><h1 id="guide-ros-2-from-the-beginning-understand-it-then-build-with-it">ROS 2
+from the beginning: understand it, then build with it</h1>
+<p>You can begin this chapter without knowing what ROS is. We will use
+one small problem throughout: a program produces a distance, and another
+program reports whether that distance is too small. First we will
+understand the pieces. Then we will create the files, run the programs
+and inspect what happens between them.</p>
+<p>This is a learning chapter, not a list of commands to memorise. Work
+through sections 1–8 before or alongside Lab 1. Return to sections 9–14
+when you need configuration files, launch files or the other
+communication methods. The complete chapter is reference material for
+several sessions; you are not expected to finish it and Lab 1 within the
+same two hours.</p>
+<details class="chapter-map" open=""><summary>Choose a part of the ROS foundations chapter</summary><ol><li><a href="#guide-why-ros">1. What problem does ROS 2 solve?</a></li><li><a href="#guide-six-words">2. Six words, one small system</a></li><li><a href="#guide-terminal-basics">3. A terminal is a way to give
+instructions</a></li><li><a href="#guide-project-layout">4. What is a ROS project, and what is inside
+it?</a></li><li><a href="#guide-make-sender">5. Create a sender and understand every part</a></li><li><a href="#guide-make-receiver">6. Create the receiver and follow one
+message</a></li><li><a href="#guide-build-run">7. Register, build and run your project</a></li><li><a href="#guide-inspect-system">8. Inspect the system instead of guessing</a></li><li><a href="#guide-yaml">9. YAML: write settings as readable data</a></li><li><a href="#guide-communication-types">10. Topics are one of three main
+communication patterns</a></li><li><a href="#guide-launch-files">11. Launch files: start the pieces together</a></li><li><a href="#guide-robot-files">12. XML, URDF and Xacro: describe a robot’s
+structure</a></li><li><a href="#guide-names-delivery">13. Names and delivery settings: why connected
+programs can still be silent</a></li><li><a href="#guide-repair-guide">14. Follow the failure to the correct stage</a></li><li><a href="#guide-guide-references">Documentation behind this chapter</a></li></ol></details><h2 id="guide-why-ros">1. What problem does ROS 2 solve?</h2>
+<p>A robot needs several kinds of software. One program reads a distance
+sensor. Another decides whether there is an obstacle. Another chooses a
+route. Another controls the wheels. We could put everything in one large
+program, but separating these responsibilities makes it easier to test
+one part, replace a sensor or reuse the same navigation code on another
+robot.</p>
+<p>Once we separate the programs, they need a way to communicate. How
+does the obstacle program receive the sensor reading? How do we inspect
+the reading without editing the sensor program? How do both programs
+agree on what the data means? <strong>ROS 2 provides libraries,
+communication rules and tools for these jobs.</strong></p>
+<p>ROS stands for <strong>Robot Operating System</strong>. Despite that
+name, ROS 2 is software that runs on an operating system such as Ubuntu.
+In this course, Ubuntu is the operating system inside your virtual
+machine. ROS 2 Jazzy is the release of ROS installed on it. A
+<strong>release</strong> is a named version of a software system; using
+the same release keeps our examples consistent.</p>
+<p>You still write the robot’s decision rules. ROS does not
+automatically know that 0.5 metres is too close, choose your algorithm
+or make a robot safe. It provides the connections through which your
+programs exchange information and the tools through which you inspect
+them.</p>
+<h3 id="guide-where-python-gazebo-and-rviz-fit">Where Python, Gazebo and RViz
+fit</h3>
+<p><strong>Python</strong> is the programming language we use to express
+our logic. A <strong>library</strong> is reusable code that another
+program can import. <code>rclpy</code> is the ROS 2 Python library: it
+provides the functions for creating nodes, sending messages and
+responding to incoming information.</p>
+<p><strong>Gazebo</strong> provides a simulated world. It calculates the
+motion of a virtual robot and generates simulated sensor readings. This
+allows us to test software without a physical robot on the desk.
+<strong>RViz</strong> displays ROS data, such as the robot’s shape, a
+map or sensor measurements. Seeing a robot in RViz does not mean that a
+physics simulation is running.</p>
+<p>For this first project, we use Python to invent distance readings. No
+robot model, Gazebo world or hardware is needed. Later, a sensor can
+supply the distances while much of our receiving logic remains the
+same.</p>
+<h2 id="guide-six-words">2. Six words, one small system</h2>
+<p>Suppose our first program produces the number <code>0.5</code>,
+meaning a distance of half a metre. Our second program receives it and
+compares it with <code>1.0</code>, meaning one metre.</p>
+<p>A <strong>node</strong> is a named software component that uses ROS
+communication. In our project, a node called
+<code>distance_sender</code> produces the number. A node called
+<code>distance_receiver</code> checks it. Each runs in its own program
+here, although ROS also supports multiple nodes inside one program.</p>
+<p>A <strong>message</strong> is one item of information sent between
+components. It has a defined structure, called its <strong>message
+type</strong>. We will use <code>std_msgs/msg/Float32</code>. This type
+has one field named <code>data</code>, which holds a floating-point
+number, meaning a number that can have a fractional part. A message
+might contain:</p>
+<div class="sourceCode" id="guide-cb1"><pre class="sourceCode yaml"><code class="sourceCode yaml"><span id="guide-cb1-1"><a aria-hidden="true" href="#guide-cb1-1" tabindex="-1"></a><span class="fu">data</span><span class="kw">:</span><span class="at"> </span><span class="fl">0.5</span></span></code></pre></div>
+<p>Read this as “the field named data has the value 0.5.” The type does
+not encode metres. Our two programs agree that the number represents
+metres. If one program interpreted it as centimetres, the connection
+might still work while the result was wrong.</p>
+<p>A <strong>topic</strong> is a named communication channel carrying
+messages of a particular type. Our channel will be
+<code>/practice_distance</code>. It is a ROS name, not a file on your
+computer. A <strong>publisher</strong> sends messages to the topic. A
+<strong>subscription</strong> receives messages from it; we commonly
+call the receiving component a subscriber.</p>
+<p>The sender does not need the receiver’s Python function name. Both
+use the same topic name and compatible message type and delivery
+settings. This lets us add a third observer, such as a terminal display,
+without editing the sender. A topic can have multiple publishers and
+multiple subscribers.</p>
+<p>A <strong>callback</strong> is a function we register for later
+execution when an event occurs. Our sender has a timer callback: “every
+half-second, send a value.” Our receiver has a subscription callback:
+“when a message arrives, check its value.” A node can contain both kinds
+of callback and can publish and subscribe at the same time.</p>
+<p><strong>The ROS graph</strong> means the running nodes and their
+communication connections. The graph changes as programs start and stop.
+Files saved on disk are not running nodes.</p>
+<h2 id="guide-terminal-basics">3. A terminal is a way to give
+instructions</h2>
+<p>Open Ubuntu’s Terminal application. The text before the cursor may
+look like <code>ros@ros-VirtualBox:~$</code>. That is the
+<strong>prompt</strong>, which tells you the terminal is ready. Do not
+type that prompt when copying a command. Type only the command, then
+press Enter.</p>
+<p>The program that reads your command is the <strong>shell</strong>. In
+these labs we use Bash. Some commands, such as <code>cd</code>, belong
+to the shell; others, such as <code>ros2</code>, start a separate tool.
+A command can take <strong>arguments</strong>, which supply names or
+values, and <strong>options</strong>, which change how it operates.</p>
+<p>Try these one at a time:</p>
+<div class="sourceCode" id="guide-cb2"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="guide-cb2-1"><a aria-hidden="true" href="#guide-cb2-1" tabindex="-1"></a><span class="bu">pwd</span></span>
+<span id="guide-cb2-2"><a aria-hidden="true" href="#guide-cb2-2" tabindex="-1"></a><span class="fu">ls</span></span></code></pre></div>
+<p><code>pwd</code> prints your current directory, the folder this
+terminal is working in. <code>ls</code> lists its contents. A
+<strong>path</strong> describes a location.
+<code>/opt/ros/jazzy/setup.bash</code> begins with <code>/</code>, so it
+is an absolute path starting from the filesystem’s root.
+<code>src/hello_robot</code> is a relative path, interpreted from the
+current directory. <code>~</code> means your home directory, usually
+<code>/home/ros</code> on the course VM.</p>
+<div class="sourceCode" id="guide-cb3"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="guide-cb3-1"><a aria-hidden="true" href="#guide-cb3-1" tabindex="-1"></a><span class="fu">mkdir</span> <span class="at">-p</span> ~/beginner_ws/src</span>
+<span id="guide-cb3-2"><a aria-hidden="true" href="#guide-cb3-2" tabindex="-1"></a><span class="bu">cd</span> ~/beginner_ws</span>
+<span id="guide-cb3-3"><a aria-hidden="true" href="#guide-cb3-3" tabindex="-1"></a><span class="bu">pwd</span></span></code></pre></div>
+<p><code>mkdir</code> creates a directory. <code>-p</code> also creates
+missing parent directories and accepts a directory that already exists.
+<code>cd</code> changes this terminal’s current directory. The final
+command should print a path ending in <code>/beginner_ws</code>.</p>
+<p>A running program may keep the terminal busy. That is normal for a
+ROS node: it remains available for new messages. Open another terminal
+for your next command. Press <strong>Ctrl+C</strong> in the original
+terminal to request that its current program stop. Opening a new
+terminal does not stop programs in the old one.</p>
+<h3 id="guide-make-ros-available-in-this-terminal">Make ROS available in this
+terminal</h3>
+<div class="sourceCode" id="guide-cb4"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="guide-cb4-1"><a aria-hidden="true" href="#guide-cb4-1" tabindex="-1"></a><span class="bu">source</span> /opt/ros/jazzy/setup.bash</span>
+<span id="guide-cb4-2"><a aria-hidden="true" href="#guide-cb4-2" tabindex="-1"></a><span class="ex">ros2</span> <span class="at">--help</span></span></code></pre></div>
+<p><code>source</code> reads a shell script into the current shell. This
+script adds the locations and settings needed to find ROS tools and
+packages. It does not start a robot or node. Its effects apply to this
+terminal and programs started from it. A different terminal needs its
+own setup unless your shell startup files already do it.</p>
+<p><code>--help</code> asks a tool to explain its available commands.
+<code>ros2 --help</code> lists groups such as <code>node</code>,
+<code>topic</code>, <code>service</code> and <code>action</code>. You
+can ask more specifically with <code>ros2 topic --help</code>, then
+<code>ros2 topic echo --help</code>.</p>
+<p>A command split across lines may end each continued line with
+<code>\</code>. That means the next line belongs to the same command.
+There must be no characters after that backslash. You may instead write
+the whole command on one line with spaces.</p>
+<h2 id="guide-project-layout">4. What is a ROS project, and what is inside
+it?</h2>
+<p>A <strong>project</strong> is the whole application you are building.
+ROS does not require one particular folder named “project.” We organise
+our work using workspaces and packages.</p>
+<p>A <strong>workspace</strong> is a directory in which we develop and
+build ROS packages. A <strong>package</strong> groups related code and
+information about how to install and use it. A project may contain one
+package or many. The course has several packages because describing a
+robot, simulating it and running navigation are different
+responsibilities.</p>
+<p>We will create a separate practice workspace,
+<code>~/beginner_ws</code>, containing one package called
+<code>hello_robot</code>. Lab 1 uses <code>~/student_ws</code> and
+<code>robot_workshop</code> for the project you extend through the
+course. The practice names here are deliberately different so you can
+try these instructions without replacing your lab work. If you only want
+to create one project, read this worked example and follow Lab 1’s
+corresponding build activity.</p>
+<p>Before the first build, your workspace contains <code>src</code>,
+short for source. <strong>Source code</strong> is the code you edit.
+Building will create three more directories:</p>
+<div aria-label="Scrollable reference table" class="table-scroll" role="region" tabindex="0"><table>
+<colgroup>
+<col style="width: 33%"/>
+<col style="width: 33%"/>
+<col style="width: 33%"/>
+</colgroup>
+<thead>
+<tr class="header">
+<th>Directory under <code>~/beginner_ws</code></th>
+<th>What goes there</th>
+<th>Do I normally edit it?</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>src/</code></td>
+<td>Your packages and their source files</td>
+<td>Yes. This is your work.</td>
+</tr>
+<tr class="even">
+<td><code>build/</code></td>
+<td>Intermediate files produced while preparing packages</td>
+<td>No. Build tools manage it.</td>
+</tr>
+<tr class="odd">
+<td><code>install/</code></td>
+<td>The prepared packages, executable registrations and setup
+scripts</td>
+<td>No. Rebuild from source instead.</td>
+</tr>
+<tr class="even">
+<td><code>log/</code></td>
+<td>Reports from build and test commands</td>
+<td>Read these when something fails.</td>
+</tr>
+</tbody>
+</table></div>
+<p>For Python, “build” usually means preparing the package for
+installation and discovery; it does not mean converting all your Python
+into machine code. This preparation is why saving a <code>.py</code>
+file alone does not automatically make <code>ros2 run</code> find
+it.</p>
+<h3 id="guide-create-the-package-skeleton">Create the package skeleton</h3>
+<p>Use a fresh terminal. These two dependencies are already available in
+the course VM:</p>
+<div class="sourceCode" id="guide-cb5"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="guide-cb5-1"><a aria-hidden="true" href="#guide-cb5-1" tabindex="-1"></a><span class="bu">source</span> /opt/ros/jazzy/setup.bash</span>
+<span id="guide-cb5-2"><a aria-hidden="true" href="#guide-cb5-2" tabindex="-1"></a><span class="fu">mkdir</span> <span class="at">-p</span> ~/beginner_ws/src</span>
+<span id="guide-cb5-3"><a aria-hidden="true" href="#guide-cb5-3" tabindex="-1"></a><span class="bu">cd</span> ~/beginner_ws/src</span>
+<span id="guide-cb5-4"><a aria-hidden="true" href="#guide-cb5-4" tabindex="-1"></a><span class="ex">ros2</span> pkg create <span class="at">--build-type</span> ament_python <span class="at">--license</span> Apache-2.0 hello_robot <span class="at">--dependencies</span> rclpy std_msgs</span></code></pre></div>
+<p>Read the last command in pieces:</p>
+<div aria-label="Scrollable reference table" class="table-scroll" role="region" tabindex="0"><table>
+<colgroup>
+<col style="width: 50%"/>
+<col style="width: 50%"/>
+</colgroup>
+<thead>
+<tr class="header">
+<th>Piece</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>ros2 pkg create</code></td>
+<td>Ask the ROS tool to create a package’s starting files.</td>
+</tr>
+<tr class="even">
+<td><code>--build-type ament_python</code></td>
+<td>Use ROS’s Python package support.</td>
+</tr>
+<tr class="odd">
+<td><code>--license Apache-2.0</code></td>
+<td>Record the licence chosen for this example package.</td>
+</tr>
+<tr class="even">
+<td><code>hello_robot</code></td>
+<td>Name the package. You choose this name.</td>
+</tr>
+<tr class="odd">
+<td><code>--dependencies rclpy std_msgs</code></td>
+<td>Record that this package needs the ROS Python library and the
+standard message definitions.</td>
+</tr>
+</tbody>
+</table></div>
+<p>A <strong>dependency</strong> is software your code relies on.
+Declaring a dependency records the requirement; it does not itself
+install that software. Here <code>rclpy</code> supplies the ROS
+functions and <code>std_msgs</code> supplies the message definition. ROS
+also supports C++ packages, commonly using <code>ament_cmake</code>. We
+are choosing Python because it suits the course’s algorithm
+exercises.</p>
+<p>Run creation once. If <code>hello_robot</code> already exists,
+inspect and continue editing it. Do not repeatedly create the package or
+delete your work to follow a command again.</p>
+<h3 id="guide-open-the-generated-files">Open the generated files</h3>
+<p>Use Ubuntu’s Files application to open <code>beginner_ws</code>, then
+<code>src</code>, then <code>hello_robot</code>. Open source files in a
+plain text editor.</p>
+<p>The outer directory is the ROS package. The inner directory of the
+same name contains its Python code. Those two directories have different
+jobs:</p>
+<div aria-label="Scrollable reference table" class="table-scroll" role="region" tabindex="0"><table>
+<colgroup>
+<col style="width: 50%"/>
+<col style="width: 50%"/>
+</colgroup>
+<thead>
+<tr class="header">
+<th>Path relative to <code>~/beginner_ws/src/hello_robot/</code></th>
+<th>Its job</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>package.xml</code></td>
+<td>Identifies the package and declares dependencies and build
+type.</td>
+</tr>
+<tr class="even">
+<td><code>setup.py</code></td>
+<td>Tells Python’s installation tools which code and data to install and
+which command names to create.</td>
+</tr>
+<tr class="odd">
+<td><code>setup.cfg</code></td>
+<td>Tells the installation tools where ROS expects the Python
+executables. Keep the generated settings.</td>
+</tr>
+<tr class="even">
+<td><code>resource/hello_robot</code></td>
+<td>A marker used to register the installed package in ROS’s package
+index. It may be empty.</td>
+</tr>
+<tr class="odd">
+<td><code>hello_robot/__init__.py</code></td>
+<td>Makes the inner directory an ordinary Python package. It can remain
+empty here.</td>
+</tr>
+<tr class="even">
+<td><code>test/</code></td>
+<td>Generated test files, commonly including style and licence checks.
+These do not prove the robot behaves correctly.</td>
+</tr>
+<tr class="odd">
+<td><code>hello_robot/sender.py</code></td>
+<td>Your sender program. You will create it next.</td>
+</tr>
+<tr class="even">
+<td><code>hello_robot/receiver.py</code></td>
+<td>Your receiver program. You will create it next.</td>
+</tr>
+</tbody>
+</table></div>
+<p>An <strong>index</strong> is a lookup mechanism. The package index
+helps ROS locate installed packages without searching every directory on
+disk. An <strong>executable</strong> is a program entry that can be
+started. In our Python package, an executable registration will say
+which Python function to call.</p>
+<h2 id="guide-make-sender">5. Create a sender and understand every part</h2>
+<p>Create this file in the inner Python directory:</p>
+<p><code>~/beginner_ws/src/hello_robot/hello_robot/sender.py</code></p>
+<p>Paste the following complete program into it and save it. This sends
+the same configurable distance every half-second; there is no
+trigonometry in this first example.</p>
+<div class="sourceCode" id="guide-cb6"><pre class="sourceCode python"><code class="sourceCode python"><span id="guide-cb6-1"><a aria-hidden="true" href="#guide-cb6-1" tabindex="-1"></a><span class="im">import</span> rclpy</span>
+<span id="guide-cb6-2"><a aria-hidden="true" href="#guide-cb6-2" tabindex="-1"></a><span class="im">from</span> rclpy.node <span class="im">import</span> Node</span>
+<span id="guide-cb6-3"><a aria-hidden="true" href="#guide-cb6-3" tabindex="-1"></a><span class="im">from</span> std_msgs.msg <span class="im">import</span> Float32</span>
+<span id="guide-cb6-4"><a aria-hidden="true" href="#guide-cb6-4" tabindex="-1"></a></span>
+<span id="guide-cb6-5"><a aria-hidden="true" href="#guide-cb6-5" tabindex="-1"></a></span>
+<span id="guide-cb6-6"><a aria-hidden="true" href="#guide-cb6-6" tabindex="-1"></a><span class="kw">class</span> DistanceSender(Node):</span>
+<span id="guide-cb6-7"><a aria-hidden="true" href="#guide-cb6-7" tabindex="-1"></a>    <span class="kw">def</span> <span class="fu">__init__</span>(<span class="va">self</span>):</span>
+<span id="guide-cb6-8"><a aria-hidden="true" href="#guide-cb6-8" tabindex="-1"></a>        <span class="bu">super</span>().<span class="fu">__init__</span>(<span class="st">'distance_sender'</span>)</span>
+<span id="guide-cb6-9"><a aria-hidden="true" href="#guide-cb6-9" tabindex="-1"></a>        <span class="va">self</span>.declare_parameter(<span class="st">'distance_m'</span>, <span class="fl">0.5</span>)</span>
+<span id="guide-cb6-10"><a aria-hidden="true" href="#guide-cb6-10" tabindex="-1"></a>        <span class="va">self</span>.publisher <span class="op">=</span> <span class="va">self</span>.create_publisher(</span>
+<span id="guide-cb6-11"><a aria-hidden="true" href="#guide-cb6-11" tabindex="-1"></a>            Float32, <span class="st">'practice_distance'</span>, <span class="dv">10</span>)</span>
+<span id="guide-cb6-12"><a aria-hidden="true" href="#guide-cb6-12" tabindex="-1"></a>        <span class="va">self</span>.timer <span class="op">=</span> <span class="va">self</span>.create_timer(<span class="fl">0.5</span>, <span class="va">self</span>.send_distance)</span>
+<span id="guide-cb6-13"><a aria-hidden="true" href="#guide-cb6-13" tabindex="-1"></a></span>
+<span id="guide-cb6-14"><a aria-hidden="true" href="#guide-cb6-14" tabindex="-1"></a>    <span class="kw">def</span> send_distance(<span class="va">self</span>):</span>
+<span id="guide-cb6-15"><a aria-hidden="true" href="#guide-cb6-15" tabindex="-1"></a>        message <span class="op">=</span> Float32()</span>
+<span id="guide-cb6-16"><a aria-hidden="true" href="#guide-cb6-16" tabindex="-1"></a>        message.data <span class="op">=</span> <span class="bu">float</span>(<span class="va">self</span>.get_parameter(<span class="st">'distance_m'</span>).value)</span>
+<span id="guide-cb6-17"><a aria-hidden="true" href="#guide-cb6-17" tabindex="-1"></a>        <span class="va">self</span>.publisher.publish(message)</span>
+<span id="guide-cb6-18"><a aria-hidden="true" href="#guide-cb6-18" tabindex="-1"></a></span>
+<span id="guide-cb6-19"><a aria-hidden="true" href="#guide-cb6-19" tabindex="-1"></a></span>
+<span id="guide-cb6-20"><a aria-hidden="true" href="#guide-cb6-20" tabindex="-1"></a><span class="kw">def</span> main(args<span class="op">=</span><span class="va">None</span>):</span>
+<span id="guide-cb6-21"><a aria-hidden="true" href="#guide-cb6-21" tabindex="-1"></a>    rclpy.init(args<span class="op">=</span>args)</span>
+<span id="guide-cb6-22"><a aria-hidden="true" href="#guide-cb6-22" tabindex="-1"></a>    node <span class="op">=</span> DistanceSender()</span>
+<span id="guide-cb6-23"><a aria-hidden="true" href="#guide-cb6-23" tabindex="-1"></a>    <span class="cf">try</span>:</span>
+<span id="guide-cb6-24"><a aria-hidden="true" href="#guide-cb6-24" tabindex="-1"></a>        rclpy.spin(node)</span>
+<span id="guide-cb6-25"><a aria-hidden="true" href="#guide-cb6-25" tabindex="-1"></a>    <span class="cf">except</span> <span class="pp">KeyboardInterrupt</span>:</span>
+<span id="guide-cb6-26"><a aria-hidden="true" href="#guide-cb6-26" tabindex="-1"></a>        <span class="cf">pass</span></span>
+<span id="guide-cb6-27"><a aria-hidden="true" href="#guide-cb6-27" tabindex="-1"></a>    <span class="cf">finally</span>:</span>
+<span id="guide-cb6-28"><a aria-hidden="true" href="#guide-cb6-28" tabindex="-1"></a>        node.destroy_node()</span>
+<span id="guide-cb6-29"><a aria-hidden="true" href="#guide-cb6-29" tabindex="-1"></a>        <span class="cf">if</span> rclpy.ok():</span>
+<span id="guide-cb6-30"><a aria-hidden="true" href="#guide-cb6-30" tabindex="-1"></a>            rclpy.shutdown()</span></code></pre></div>
+<h3 id="guide-read-the-imports-first">Read the imports first</h3>
+<p><code>import rclpy</code> makes the ROS Python library available.
+<code>from rclpy.node import Node</code> brings in the basic node class.
+<code>from std_msgs.msg import Float32</code> brings in the message
+class. A <strong>class</strong> describes the data and functions that an
+object can have. Creating <code>Float32()</code> makes one message
+object we can fill.</p>
+<p>The spelling changes with context: Python imports
+<code>std_msgs.msg.Float32</code>; the ROS command line names the
+interface <code>std_msgs/msg/Float32</code>. Both refer to the same
+message definition.</p>
+<h3 id="guide-read-the-nodes-setup">Read the node’s setup</h3>
+<p><code>class DistanceSender(Node):</code> defines our own kind of node
+using the existing ROS <code>Node</code> class. <code>__init__</code> is
+its constructor, the function Python calls when creating an object.
+<code>self</code> means this particular object.
+<code>super().__init__('distance_sender')</code> sets up the ROS node
+with that name.</p>
+<p><code>declare_parameter('distance_m', 0.5)</code> creates a named
+setting with a default value. A <strong>parameter</strong> is a node’s
+configuration value. Here it is the distance to publish, measured in
+metres by our agreement. We use a parameter so we can try another
+distance without rewriting the program.</p>
+<p><code>create_publisher(Float32, 'practice_distance', 10)</code>
+creates a publisher. The first argument selects the message type. The
+second selects the topic. The final <code>10</code> supplies a
+queue-depth setting, meaning up to ten samples in the relevant history
+setting. It does <strong>not</strong> mean ten messages per second or
+ten subscribers.</p>
+<p><code>create_timer(0.5, self.send_distance)</code> asks ROS to make
+the callback ready every 0.5 seconds. The desired rate is
+<code>1 / 0.5 = 2</code> messages per second, or <strong>2 Hz</strong>.
+The computer’s workload can affect actual timing.</p>
+<p>Notice that we give the timer <code>self.send_distance</code> without
+<code>()</code>. We are giving it the function to call later. Writing
+<code>self.send_distance()</code> would call the function immediately
+and pass its return value instead.</p>
+<h3 id="guide-read-what-happens-at-each-timer-event">Read what happens at each
+timer event</h3>
+<p>The callback creates an empty <code>Float32</code> message, reads the
+parameter’s current value, puts it into <code>message.data</code> and
+publishes the message. Reading the parameter every time is a deliberate
+choice: it lets later parameter changes affect new messages. A parameter
+change does not automatically rewrite arbitrary Python variables or
+timers elsewhere in a program.</p>
+<p><code>float(...)</code> converts the value to a floating-point
+number. The dot in <code>message.data</code> means “the data field
+belonging to this message.” The <code>=</code> sign assigns a value; it
+is not a mathematical claim that two expressions are equal forever.</p>
+<h3 id="guide-read-where-the-program-begins">Read where the program
+begins</h3>
+<p>Our executable will call <code>main()</code>.
+<code>rclpy.init()</code> prepares ROS communication.
+<code>DistanceSender()</code> constructs our node and its publisher and
+timer. <code>rclpy.spin(node)</code> lets ROS keep processing ready
+work, including timer and message callbacks. Here “spin” does not mean
+turn the robot or rotate a wheel.</p>
+<p><code>try</code> runs the main work.
+<code>except KeyboardInterrupt</code> handles a keyboard interruption
+such as Ctrl+C. <code>finally</code> performs cleanup as the program
+exits. <code>destroy_node()</code> releases this node’s resources;
+<code>shutdown()</code> shuts down its ROS context if it is still
+active.</p>
+<p>A file that only defines <code>main</code> does not call it by
+itself. The executable registration in section 7 will make the call. Use
+<code>ros2 run</code> as shown there.</p>
+<h2 id="guide-make-receiver">6. Create the receiver and follow one
+message</h2>
+<p>Create and save:</p>
+<p><code>~/beginner_ws/src/hello_robot/hello_robot/receiver.py</code></p>
+<div class="sourceCode" id="guide-cb7"><pre class="sourceCode python"><code class="sourceCode python"><span id="guide-cb7-1"><a aria-hidden="true" href="#guide-cb7-1" tabindex="-1"></a><span class="im">import</span> rclpy</span>
+<span id="guide-cb7-2"><a aria-hidden="true" href="#guide-cb7-2" tabindex="-1"></a><span class="im">from</span> rclpy.node <span class="im">import</span> Node</span>
+<span id="guide-cb7-3"><a aria-hidden="true" href="#guide-cb7-3" tabindex="-1"></a><span class="im">from</span> std_msgs.msg <span class="im">import</span> Float32</span>
+<span id="guide-cb7-4"><a aria-hidden="true" href="#guide-cb7-4" tabindex="-1"></a></span>
+<span id="guide-cb7-5"><a aria-hidden="true" href="#guide-cb7-5" tabindex="-1"></a></span>
+<span id="guide-cb7-6"><a aria-hidden="true" href="#guide-cb7-6" tabindex="-1"></a><span class="kw">class</span> DistanceReceiver(Node):</span>
+<span id="guide-cb7-7"><a aria-hidden="true" href="#guide-cb7-7" tabindex="-1"></a>    <span class="kw">def</span> <span class="fu">__init__</span>(<span class="va">self</span>):</span>
+<span id="guide-cb7-8"><a aria-hidden="true" href="#guide-cb7-8" tabindex="-1"></a>        <span class="bu">super</span>().<span class="fu">__init__</span>(<span class="st">'distance_receiver'</span>)</span>
+<span id="guide-cb7-9"><a aria-hidden="true" href="#guide-cb7-9" tabindex="-1"></a>        <span class="va">self</span>.subscription <span class="op">=</span> <span class="va">self</span>.create_subscription(</span>
+<span id="guide-cb7-10"><a aria-hidden="true" href="#guide-cb7-10" tabindex="-1"></a>            Float32, <span class="st">'practice_distance'</span>, <span class="va">self</span>.on_distance, <span class="dv">10</span>)</span>
+<span id="guide-cb7-11"><a aria-hidden="true" href="#guide-cb7-11" tabindex="-1"></a></span>
+<span id="guide-cb7-12"><a aria-hidden="true" href="#guide-cb7-12" tabindex="-1"></a>    <span class="kw">def</span> on_distance(<span class="va">self</span>, message):</span>
+<span id="guide-cb7-13"><a aria-hidden="true" href="#guide-cb7-13" tabindex="-1"></a>        <span class="cf">if</span> message.data <span class="op">&lt;</span> <span class="fl">1.0</span>:</span>
+<span id="guide-cb7-14"><a aria-hidden="true" href="#guide-cb7-14" tabindex="-1"></a>            <span class="va">self</span>.get_logger().warning(<span class="st">'Object is closer than 1 metre'</span>)</span>
+<span id="guide-cb7-15"><a aria-hidden="true" href="#guide-cb7-15" tabindex="-1"></a>        <span class="cf">else</span>:</span>
+<span id="guide-cb7-16"><a aria-hidden="true" href="#guide-cb7-16" tabindex="-1"></a>            <span class="va">self</span>.get_logger().info(<span class="st">'Object is at least 1 metre away'</span>)</span>
+<span id="guide-cb7-17"><a aria-hidden="true" href="#guide-cb7-17" tabindex="-1"></a></span>
+<span id="guide-cb7-18"><a aria-hidden="true" href="#guide-cb7-18" tabindex="-1"></a></span>
+<span id="guide-cb7-19"><a aria-hidden="true" href="#guide-cb7-19" tabindex="-1"></a><span class="kw">def</span> main(args<span class="op">=</span><span class="va">None</span>):</span>
+<span id="guide-cb7-20"><a aria-hidden="true" href="#guide-cb7-20" tabindex="-1"></a>    rclpy.init(args<span class="op">=</span>args)</span>
+<span id="guide-cb7-21"><a aria-hidden="true" href="#guide-cb7-21" tabindex="-1"></a>    node <span class="op">=</span> DistanceReceiver()</span>
+<span id="guide-cb7-22"><a aria-hidden="true" href="#guide-cb7-22" tabindex="-1"></a>    <span class="cf">try</span>:</span>
+<span id="guide-cb7-23"><a aria-hidden="true" href="#guide-cb7-23" tabindex="-1"></a>        rclpy.spin(node)</span>
+<span id="guide-cb7-24"><a aria-hidden="true" href="#guide-cb7-24" tabindex="-1"></a>    <span class="cf">except</span> <span class="pp">KeyboardInterrupt</span>:</span>
+<span id="guide-cb7-25"><a aria-hidden="true" href="#guide-cb7-25" tabindex="-1"></a>        <span class="cf">pass</span></span>
+<span id="guide-cb7-26"><a aria-hidden="true" href="#guide-cb7-26" tabindex="-1"></a>    <span class="cf">finally</span>:</span>
+<span id="guide-cb7-27"><a aria-hidden="true" href="#guide-cb7-27" tabindex="-1"></a>        node.destroy_node()</span>
+<span id="guide-cb7-28"><a aria-hidden="true" href="#guide-cb7-28" tabindex="-1"></a>        <span class="cf">if</span> rclpy.ok():</span>
+<span id="guide-cb7-29"><a aria-hidden="true" href="#guide-cb7-29" tabindex="-1"></a>            rclpy.shutdown()</span></code></pre></div>
+<p>The constructor registers a subscription using the sender’s topic and
+type. <code>self.on_distance</code> is the function to call when a
+message arrives. ROS supplies the received message as its argument. We
+store the subscription on <code>self</code> so the node keeps a
+reference to it.</p>
+<p>For <code>data: 0.5</code>, the comparison <code>0.5 &lt; 1.0</code>
+is true, so the warning line runs. For <code>data: 1.5</code>, it is
+false, so the <code>else</code> line runs. Exactly <code>1.0</code> also
+enters <code>else</code>, because <code>&lt;</code> means strictly less
+than. If the requirement included exactly one metre, we would use
+<code>&lt;=</code>.</p>
+<p>A <strong>logger</strong> writes messages with useful context such as
+severity and node name. A warning line here reports our rule’s result.
+It does not stop a motor or send a braking command. This example assumes
+finite numeric inputs; Lab 1’s fuller receiver also checks for invalid
+numbers before making its decision.</p>
+<p>The receiver does not contain an endless loop repeatedly checking the
+topic. ROS schedules its callback when data is available while
+<code>spin</code> is running. This event-based structure also lets a
+node handle timers and other communication.</p>
+<h2 id="guide-build-run">7. Register, build and run your project</h2>
+<p>Open <code>~/beginner_ws/src/hello_robot/setup.py</code>. Find the
+<code>entry_points</code> argument. Replace its empty
+<code>console_scripts</code> list with the two entries below. Keep the
+other generated arguments. This is a fragment to edit inside the file,
+not a replacement for the entire file:</p>
+<div class="sourceCode" id="guide-cb8"><pre class="sourceCode python"><code class="sourceCode python"><span id="guide-cb8-1"><a aria-hidden="true" href="#guide-cb8-1" tabindex="-1"></a>entry_points<span class="op">=</span>{</span>
+<span id="guide-cb8-2"><a aria-hidden="true" href="#guide-cb8-2" tabindex="-1"></a>    <span class="st">'console_scripts'</span>: [</span>
+<span id="guide-cb8-3"><a aria-hidden="true" href="#guide-cb8-3" tabindex="-1"></a>        <span class="st">'send_distance = hello_robot.sender:main'</span>,</span>
+<span id="guide-cb8-4"><a aria-hidden="true" href="#guide-cb8-4" tabindex="-1"></a>        <span class="st">'check_distance = hello_robot.receiver:main'</span>,</span>
+<span id="guide-cb8-5"><a aria-hidden="true" href="#guide-cb8-5" tabindex="-1"></a>    ],</span>
+<span id="guide-cb8-6"><a aria-hidden="true" href="#guide-cb8-6" tabindex="-1"></a>},</span></code></pre></div>
+<p>For the first entry, <code>send_distance</code> is the executable
+name we choose. <code>hello_robot.sender</code> means the
+<code>sender.py</code> module inside the inner <code>hello_robot</code>
+directory. <code>:main</code> names the function to call. There is no
+<code>.py</code> at the end of this import path.</p>
+<p>Now compare the different names. They do not have to be
+identical:</p>
+<div aria-label="Scrollable reference table" class="table-scroll" role="region" tabindex="0"><table>
+<thead>
+<tr class="header">
+<th>Kind of name</th>
+<th>Our sender example</th>
+<th>Where we chose it</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>ROS package</td>
+<td><code>hello_robot</code></td>
+<td>Package creation command</td>
+</tr>
+<tr class="even">
+<td>Python source file</td>
+<td><code>sender.py</code></td>
+<td>File we created</td>
+</tr>
+<tr class="odd">
+<td>Executable</td>
+<td><code>send_distance</code></td>
+<td>Entry in <code>setup.py</code></td>
+</tr>
+<tr class="even">
+<td>Node</td>
+<td><code>/distance_sender</code></td>
+<td><code>super().__init__</code> in the Python code</td>
+</tr>
+<tr class="odd">
+<td>Topic</td>
+<td><code>/practice_distance</code></td>
+<td><code>create_publisher</code> in the Python code</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="guide-build-in-a-terminal-that-has-not-sourced-this-workspace">Build
+in a terminal that has not sourced this workspace</h3>
+<p>Use a fresh terminal and run:</p>
+<div class="sourceCode" id="guide-cb9"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="guide-cb9-1"><a aria-hidden="true" href="#guide-cb9-1" tabindex="-1"></a><span class="bu">source</span> /opt/ros/jazzy/setup.bash</span>
+<span id="guide-cb9-2"><a aria-hidden="true" href="#guide-cb9-2" tabindex="-1"></a><span class="bu">cd</span> ~/beginner_ws</span>
+<span id="guide-cb9-3"><a aria-hidden="true" href="#guide-cb9-3" tabindex="-1"></a><span class="ex">colcon</span> build <span class="at">--symlink-install</span> <span class="at">--packages-select</span> hello_robot</span></code></pre></div>
+<p><strong>colcon</strong> is the tool that coordinates building
+packages in a workspace. <code>--packages-select hello_robot</code>
+selects our package. <code>--symlink-install</code> asks it to use links
+where supported, which helps during Python development. It does not
+remove the need to rebuild when you add executables, change installation
+rules or add data files.</p>
+<p>Read the last lines. A successful result reports one package
+finished. If the build fails, fix the first relevant error before
+continuing. A successful build says the package was prepared; it does
+not say our distance rule is correct.</p>
+<h3 id="guide-run-the-two-programs-in-separate-terminals">Run the two programs
+in separate terminals</h3>
+<p>In <strong>Terminal A</strong>:</p>
+<div class="sourceCode" id="guide-cb10"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="guide-cb10-1"><a aria-hidden="true" href="#guide-cb10-1" tabindex="-1"></a><span class="bu">source</span> /opt/ros/jazzy/setup.bash</span>
+<span id="guide-cb10-2"><a aria-hidden="true" href="#guide-cb10-2" tabindex="-1"></a><span class="bu">source</span> ~/beginner_ws/install/local_setup.bash</span>
+<span id="guide-cb10-3"><a aria-hidden="true" href="#guide-cb10-3" tabindex="-1"></a><span class="ex">ros2</span> run hello_robot send_distance</span></code></pre></div>
+<p>In <strong>Terminal B</strong>:</p>
+<div class="sourceCode" id="guide-cb11"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="guide-cb11-1"><a aria-hidden="true" href="#guide-cb11-1" tabindex="-1"></a><span class="bu">source</span> /opt/ros/jazzy/setup.bash</span>
+<span id="guide-cb11-2"><a aria-hidden="true" href="#guide-cb11-2" tabindex="-1"></a><span class="bu">source</span> ~/beginner_ws/install/local_setup.bash</span>
+<span id="guide-cb11-3"><a aria-hidden="true" href="#guide-cb11-3" tabindex="-1"></a><span class="ex">ros2</span> run hello_robot check_distance</span></code></pre></div>
+<p>The sender may show no output; it publishes without logging. The
+receiver should repeatedly report that the object is closer than one
+metre. Leave both running.</p>
+<p>Read <code>ros2 run hello_robot send_distance</code> as “use the ROS
+tool to run the executable named send_distance from the installed
+package hello_robot.” The command looks up the package. You do not have
+to stand in its source directory to run it.</p>
+<p>The first <code>source</code> loads the ROS installation. The second
+adds this workspace. ROS is our <strong>underlay</strong>, the existing
+foundation; our workspace is an <strong>overlay</strong>, the added set
+of packages. In the course, there is also a course workspace between ROS
+and your student workspace. These words describe setup order, not
+different kinds of source code.</p>
+<p>After editing a running Python program, stop and restart it. A
+running process normally continues using the code it already loaded.
+After changing package installation rules, rebuild and source the
+workspace again in the terminals that will run it.</p>
+<h2 id="guide-inspect-system">8. Inspect the system instead of guessing</h2>
+<p>Open <strong>Terminal C</strong> and source ROS and the practice
+workspace as in A. A and B must still be running.</p>
+<div class="sourceCode" id="guide-cb12"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="guide-cb12-1"><a aria-hidden="true" href="#guide-cb12-1" tabindex="-1"></a><span class="ex">ros2</span> node list</span></code></pre></div>
+<p>You should find <code>/distance_sender</code> and
+<code>/distance_receiver</code>. This command answers “which nodes can
+this terminal discover?” It does not list all source files or all
+installed packages. Other nodes may appear if you have other ROS
+programs running.</p>
+<div class="sourceCode" id="guide-cb13"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="guide-cb13-1"><a aria-hidden="true" href="#guide-cb13-1" tabindex="-1"></a><span class="ex">ros2</span> node info /distance_receiver</span></code></pre></div>
+<p>Look under subscriptions for <code>/practice_distance</code>. This
+answers “what is this node connected to?” Other entries are normal
+because ROS nodes also expose supporting interfaces.</p>
+<div class="sourceCode" id="guide-cb14"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="guide-cb14-1"><a aria-hidden="true" href="#guide-cb14-1" tabindex="-1"></a><span class="ex">ros2</span> topic list <span class="at">-t</span></span>
+<span id="guide-cb14-2"><a aria-hidden="true" href="#guide-cb14-2" tabindex="-1"></a><span class="ex">ros2</span> topic type /practice_distance</span>
+<span id="guide-cb14-3"><a aria-hidden="true" href="#guide-cb14-3" tabindex="-1"></a><span class="ex">ros2</span> interface show std_msgs/msg/Float32</span></code></pre></div>
+<p>The first command lists discovered topic names and types. The second
+asks for one topic’s type. The third reads the type’s definition: expect
+<code>float32 data</code>, possibly with comments. An
+<strong>interface</strong> is a shared agreement about the structure of
+data exchanged between programs.</p>
+<div class="sourceCode" id="guide-cb15"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="guide-cb15-1"><a aria-hidden="true" href="#guide-cb15-1" tabindex="-1"></a><span class="ex">ros2</span> topic echo /practice_distance <span class="at">--once</span></span></code></pre></div>
+<p>Expect a message containing <code>data: 0.5</code>. <code>echo</code>
+subscribes and prints what arrives. <code>--once</code> exits after one
+message. If it waits, that usually means no matching message has arrived
+yet, not that the terminal is frozen.</p>
+<div class="sourceCode" id="guide-cb16"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="guide-cb16-1"><a aria-hidden="true" href="#guide-cb16-1" tabindex="-1"></a><span class="ex">ros2</span> topic hz /practice_distance</span></code></pre></div>
+<p>Let this run for several seconds, then press Ctrl+C in C. Expect an
+observed rate around 2 Hz. This measures messages reaching this
+observer. A busy VM or delivery differences can make the measured rate
+differ from the sender’s requested rate.</p>
+<h3 id="guide-change-one-input-and-predict-the-result">Change one input and
+predict the result</h3>
+<p>Keep both nodes running. In C:</p>
+<div class="sourceCode" id="guide-cb17"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="guide-cb17-1"><a aria-hidden="true" href="#guide-cb17-1" tabindex="-1"></a><span class="ex">ros2</span> param get /distance_sender distance_m</span>
+<span id="guide-cb17-2"><a aria-hidden="true" href="#guide-cb17-2" tabindex="-1"></a><span class="ex">ros2</span> param set /distance_sender distance_m 1.5</span></code></pre></div>
+<p><code>get</code> reads the setting. <code>set</code> requests a
+change. Check that the change was accepted. New receiver lines should
+now report that the object is at least one metre away. This happens
+because the sender reads its parameter each time it prepares a message.
+Older warning lines remain visible as history.</p>
+<p>Set the value to <code>1.0</code> and check the boundary case, then
+restore <code>0.5</code>. This is a small experiment: choose an input,
+predict the decision, run it and compare the output with your
+prediction.</p>
+<h3 id="guide-test-the-receiver-with-a-value-you-choose">Test the receiver
+with a value you choose</h3>
+<p>Stop only the sender in A with Ctrl+C. Keep the receiver in B. In
+C:</p>
+<div class="sourceCode" id="guide-cb18"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="guide-cb18-1"><a aria-hidden="true" href="#guide-cb18-1" tabindex="-1"></a><span class="ex">ros2</span> topic pub <span class="at">--once</span> /practice_distance std_msgs/msg/Float32 <span class="st">'{data: 0.25}'</span></span></code></pre></div>
+<p><code>pub</code> means publish. <code>/practice_distance</code> is
+the destination topic. <code>std_msgs/msg/Float32</code> is the type.
+<code>'{data: 0.25}'</code> supplies the fields of the message. Single
+quotes keep that text together as one shell argument. The text inside
+uses YAML, explained next. <code>--once</code> sends one message and
+exits after the command’s normal discovery/publication handling.</p>
+<p>The receiver should print a warning. Repeat with
+<code>'{data: 1.0}'</code> and expect the other branch. We stopped the
+sender so its repeating values would not be mixed with our controlled
+test inputs.</p>
+<h2 id="guide-yaml">9. YAML: write settings as readable data</h2>
+<p><strong>YAML is a text format for data.</strong> A <code>.yaml</code>
+file usually contains settings that a program reads. It is not Python,
+and it does not execute a control algorithm. You can edit it with the
+same plain text editor you use for code.</p>
+<p>The basic form is <code>key: value</code>. A <strong>key</strong>
+names an item; the value gives its contents. Indentation groups items
+under other items. Use spaces consistently, commonly two per level, and
+do not use tabs for indentation.</p>
+<p>Here is a complete ROS parameter file for our sender:</p>
+<div class="sourceCode" id="guide-cb19"><pre class="sourceCode yaml"><code class="sourceCode yaml"><span id="guide-cb19-1"><a aria-hidden="true" href="#guide-cb19-1" tabindex="-1"></a><span class="fu">distance_sender</span><span class="kw">:</span></span>
+<span id="guide-cb19-2"><a aria-hidden="true" href="#guide-cb19-2" tabindex="-1"></a><span class="at">  </span><span class="fu">ros__parameters</span><span class="kw">:</span></span>
+<span id="guide-cb19-3"><a aria-hidden="true" href="#guide-cb19-3" tabindex="-1"></a><span class="at">    </span><span class="fu">distance_m</span><span class="kw">:</span><span class="at"> </span><span class="fl">0.75</span></span></code></pre></div>
+<p>Read it from the outside inward: “for the node distance_sender, set
+the ROS parameter distance_m to 0.75.” <code>ros__parameters</code> is
+the required ROS parameter-file key, with <strong>two
+underscores</strong>. Its spelling is not your choice.
+<code>distance_m</code> is our own parameter name, chosen in Python.</p>
+<p><code>0.75</code> is a number with a fractional part. <code>10</code>
+is an integer. <code>true</code> and <code>false</code> are Boolean
+values, meaning yes/no settings. Quoted text such as
+<code>"metres"</code> is a string. These types matter:
+<code>"0.75"</code> is text rather than the numeric value our parameter
+expects. To start this declared floating-point parameter at two metres,
+use <code>2.0</code> rather than changing its type to an integer.</p>
+<p>The following is a separate YAML syntax illustration, not our
+sender’s parameter file:</p>
+<div class="sourceCode" id="guide-cb20"><pre class="sourceCode yaml"><code class="sourceCode yaml"><span id="guide-cb20-1"><a aria-hidden="true" href="#guide-cb20-1" tabindex="-1"></a><span class="fu">sensor</span><span class="kw">:</span></span>
+<span id="guide-cb20-2"><a aria-hidden="true" href="#guide-cb20-2" tabindex="-1"></a><span class="at">  </span><span class="fu">name</span><span class="kw">:</span><span class="at"> </span><span class="st">"front_laser"</span></span>
+<span id="guide-cb20-3"><a aria-hidden="true" href="#guide-cb20-3" tabindex="-1"></a><span class="at">  </span><span class="fu">enabled</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span></span>
+<span id="guide-cb20-4"><a aria-hidden="true" href="#guide-cb20-4" tabindex="-1"></a><span class="at">  </span><span class="fu">offsets</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="fl">0.1</span><span class="kw">,</span><span class="at"> </span><span class="fl">0.0</span><span class="kw">,</span><span class="at"> </span><span class="fl">0.12</span><span class="kw">]</span></span></code></pre></div>
+<p>Here <code>sensor</code> contains three entries. Square brackets
+describe a list of values. The compact form <code>{data: 0.25}</code> in
+<code>ros2 topic pub</code> is also YAML: braces enclose a mapping of
+field names to values on one line. The accepted keys come from the
+message definition, which is why we inspect the interface first.</p>
+<h3 id="guide-save-and-use-our-parameter-file">Save and use our parameter
+file</h3>
+<p>Create a configuration directory:</p>
+<div class="sourceCode" id="guide-cb21"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="guide-cb21-1"><a aria-hidden="true" href="#guide-cb21-1" tabindex="-1"></a><span class="fu">mkdir</span> <span class="at">-p</span> ~/beginner_ws/src/hello_robot/config</span></code></pre></div>
+<p>Save the three-line ROS parameter example as
+<code>~/beginner_ws/src/hello_robot/config/sender.yaml</code>. If the
+sender is running, stop it. In a terminal with ROS and the practice
+workspace sourced, run:</p>
+<div class="sourceCode" id="guide-cb22"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="guide-cb22-1"><a aria-hidden="true" href="#guide-cb22-1" tabindex="-1"></a><span class="ex">ros2</span> run hello_robot send_distance <span class="at">--ros-args</span> <span class="at">--params-file</span> <span class="st">"</span><span class="va">$HOME</span><span class="st">/beginner_ws/src/hello_robot/config/sender.yaml"</span></span></code></pre></div>
+<p><code>--ros-args</code> introduces ROS-specific options.
+<code>--params-file</code> supplies the path to the settings file.
+<code>$HOME</code> expands to your home directory; double quotes
+preserve the full path as one argument. We use an explicit source-file
+path here, so this file does not yet need an installation rule.</p>
+<p>Inspect <code>/practice_distance</code> again. Expect
+<code>0.75</code>. A small difference in the last decimal digits is
+possible because Float32 has limited numerical precision. The filename
+itself can change; the node selector inside must still match the running
+node. Renaming or namespacing a node may require updating that
+selector.</p>
+<p>Editing the YAML file while the program runs does not automatically
+reload it. Restart with that file or use the appropriate runtime
+parameter command. A program can reject changes, and a parameter only
+affects behaviour where the implementation actually uses it.</p>
+<p><code>ros2 param dump /distance_sender</code> prints a running node’s
+parameters as YAML. You can save that output with <code>&gt;</code>:</p>
+<div class="sourceCode" id="guide-cb23"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="guide-cb23-1"><a aria-hidden="true" href="#guide-cb23-1" tabindex="-1"></a><span class="ex">ros2</span> param dump /distance_sender <span class="op">&gt;</span> ~/beginner_ws/sender_snapshot.yaml</span></code></pre></div>
+<p><code>&gt;</code> is shell output redirection: it writes the output
+into the named file and replaces that file’s previous contents. The
+snapshot may include standard parameters in addition to the one we
+declared.</p>
+<h2 id="guide-communication-types">10. Topics are one of three main
+communication patterns</h2>
+<p>Publisher/subscriber is not the only way ROS nodes communicate.
+Choose the pattern by asking what the interaction needs. A single node
+can use topics, services and actions together; they are not three
+mutually exclusive kinds of node.</p>
+<h3 id="guide-topics-here-is-the-latest-reading">Topics: “Here is the latest
+reading”</h3>
+<p>A sensor produces measurements continuously. Its publishers send
+messages, and interested subscribers receive them. The sender does not
+wait for each receiver to finish processing and return an
+application-level answer. Our distance stream is a topic. A camera
+stream and a stream of velocity commands are other examples.</p>
+<p>The message definition has one structure, such as the
+<code>data</code> field of Float32. Topics can also carry occasional
+events; a high message rate is common but is not what makes a topic a
+topic.</p>
+<h3 id="guide-services-please-do-this-short-operation-and-give-me-an-answer">Services:
+“Please do this short operation and give me an answer”</h3>
+<p>A <strong>service client</strong> sends a request to a
+<strong>service server</strong>. The server performs the operation and
+returns a response. For example, a client might ask a node to check
+whether a recent sensor reading is available. The server replies with a
+yes/no result and an explanation.</p>
+<p>A service is normally chosen for an operation expected to finish
+promptly. It does not provide the standard goal-progress-cancellation
+structure of an action. A service call can fail or wait if its server is
+absent or unable to respond.</p>
+<p>Lab 5 implements <code>/check_scan</code> using
+<code>std_srvs/srv/Trigger</code>. You can inspect its structure even
+before running that lab:</p>
+<div class="sourceCode" id="guide-cb24"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="guide-cb24-1"><a aria-hidden="true" href="#guide-cb24-1" tabindex="-1"></a><span class="ex">ros2</span> interface show std_srvs/srv/Trigger</span></code></pre></div>
+<p>The definition separates request and response with <code>---</code>.
+Trigger has no request fields; its response has
+<code>bool success</code> and <code>string message</code>.
+<code>bool</code> is a true/false value, and <code>string</code> is
+text.</p>
+<p>The following call belongs to <strong>Lab 5, while its scan-service
+node is running</strong>. Our two practice nodes do not provide this
+service:</p>
+<div class="sourceCode" id="guide-cb25"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="guide-cb25-1"><a aria-hidden="true" href="#guide-cb25-1" tabindex="-1"></a><span class="ex">ros2</span> service call /check_scan std_srvs/srv/Trigger <span class="st">'{}'</span></span></code></pre></div>
+<p>The empty braces represent an empty request, not a missing response.
+Discover available services with <code>ros2 service list -t</code>, then
+inspect the type before deciding what fields to send. There can be node
+parameter services in this list even before you write your own
+application service.</p>
+<h3 id="guide-actions-work-toward-this-goal-report-progress-and-let-me-request-a-stop">Actions:
+“Work toward this goal, report progress and let me request a stop”</h3>
+<p>Navigation can take many seconds. An <strong>action client</strong>
+sends a goal to an <strong>action server</strong>, which decides whether
+to accept it. While working, the server can send feedback, such as
+distance remaining. When the attempt ends, it produces a result and a
+status indicating how it ended. The client can request cancellation; the
+server handles that request according to its implementation.</p>
+<p>Accepting a goal does not mean the goal has been reached. Feedback is
+not the final result. Closing a client or pressing Ctrl+C in its
+terminal does not by itself guarantee that the server has cancelled the
+task.</p>
+<p>In Lab 5, Nav2 supplies a navigation action. Nav2 is a set of ROS 2
+packages for navigation. Your program becomes the client that asks it to
+reach a specified pose, meaning a position and orientation.</p>
+<div class="sourceCode" id="guide-cb26"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="guide-cb26-1"><a aria-hidden="true" href="#guide-cb26-1" tabindex="-1"></a><span class="ex">ros2</span> action list <span class="at">-t</span></span>
+<span id="guide-cb26-2"><a aria-hidden="true" href="#guide-cb26-2" tabindex="-1"></a><span class="ex">ros2</span> interface show nav2_msgs/action/NavigateToPose</span></code></pre></div>
+<p>The first command shows discovered action servers when they are
+running. The second shows the definition if the interface package is
+installed. An action definition has three sections: <strong>goal,
+result, feedback</strong>, separated by two <code>---</code> lines. This
+file order differs from the chronological order in which you experience
+feedback and the final result.</p>
+<p>Lab 5 constructs the goal step by step, including its coordinate
+frame and orientation. Learn the structure before copying a large goal
+into <code>ros2 action send_goal</code>.</p>
+<div aria-label="Scrollable reference table" class="table-scroll" role="region" tabindex="0"><table>
+<colgroup>
+<col style="width: 25%"/>
+<col style="width: 25%"/>
+<col style="width: 25%"/>
+<col style="width: 25%"/>
+</colgroup>
+<thead>
+<tr class="header">
+<th>Need</th>
+<th>Suitable interface</th>
+<th>Roles</th>
+<th>What comes back?</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Repeated distance readings</td>
+<td>Topic</td>
+<td>Publisher and subscriber</td>
+<td>No required application-level reply</td>
+</tr>
+<tr class="even">
+<td>Check whether a usable scan exists</td>
+<td>Service</td>
+<td>Client and server</td>
+<td>One response for a request</td>
+</tr>
+<tr class="odd">
+<td>Drive to a destination</td>
+<td>Action</td>
+<td>Client and server</td>
+<td>Acceptance/rejection, optional feedback, then outcome for an
+accepted goal; cancellation can be requested</td>
+</tr>
+</tbody>
+</table></div>
+<p>Parameters are settings attached to nodes. ROS exposes parameter
+operations through services, but for everyday use we manage them with
+<code>ros2 param</code>. A launch file is a startup description, not a
+fourth message-exchange pattern.</p>
+<h2 id="guide-launch-files">11. Launch files: start the pieces together</h2>
+<p>Running one command in each terminal helped us see each part. Once
+those parts work, a <strong>launch file</strong> records how to start
+them together. It can select packages and executables, set parameters
+and change names. A Python launch file describes startup actions; it is
+different from the Python code implementing your distance rule.</p>
+<p>Stop the practice sender and receiver. Create a launch directory:</p>
+<div class="sourceCode" id="guide-cb27"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="guide-cb27-1"><a aria-hidden="true" href="#guide-cb27-1" tabindex="-1"></a><span class="fu">mkdir</span> <span class="at">-p</span> ~/beginner_ws/src/hello_robot/launch</span></code></pre></div>
+<p>Save this complete file as
+<code>~/beginner_ws/src/hello_robot/launch/practice.launch.py</code>:</p>
+<div class="sourceCode" id="guide-cb28"><pre class="sourceCode python"><code class="sourceCode python"><span id="guide-cb28-1"><a aria-hidden="true" href="#guide-cb28-1" tabindex="-1"></a><span class="im">from</span> launch <span class="im">import</span> LaunchDescription</span>
+<span id="guide-cb28-2"><a aria-hidden="true" href="#guide-cb28-2" tabindex="-1"></a><span class="im">from</span> launch_ros.actions <span class="im">import</span> Node</span>
+<span id="guide-cb28-3"><a aria-hidden="true" href="#guide-cb28-3" tabindex="-1"></a></span>
+<span id="guide-cb28-4"><a aria-hidden="true" href="#guide-cb28-4" tabindex="-1"></a></span>
+<span id="guide-cb28-5"><a aria-hidden="true" href="#guide-cb28-5" tabindex="-1"></a><span class="kw">def</span> generate_launch_description():</span>
+<span id="guide-cb28-6"><a aria-hidden="true" href="#guide-cb28-6" tabindex="-1"></a>    <span class="cf">return</span> LaunchDescription([</span>
+<span id="guide-cb28-7"><a aria-hidden="true" href="#guide-cb28-7" tabindex="-1"></a>        Node(</span>
+<span id="guide-cb28-8"><a aria-hidden="true" href="#guide-cb28-8" tabindex="-1"></a>            package<span class="op">=</span><span class="st">'hello_robot'</span>,</span>
+<span id="guide-cb28-9"><a aria-hidden="true" href="#guide-cb28-9" tabindex="-1"></a>            executable<span class="op">=</span><span class="st">'send_distance'</span>,</span>
+<span id="guide-cb28-10"><a aria-hidden="true" href="#guide-cb28-10" tabindex="-1"></a>            parameters<span class="op">=</span>[{<span class="st">'distance_m'</span>: <span class="fl">0.75</span>}],</span>
+<span id="guide-cb28-11"><a aria-hidden="true" href="#guide-cb28-11" tabindex="-1"></a>            output<span class="op">=</span><span class="st">'screen'</span>,</span>
+<span id="guide-cb28-12"><a aria-hidden="true" href="#guide-cb28-12" tabindex="-1"></a>        ),</span>
+<span id="guide-cb28-13"><a aria-hidden="true" href="#guide-cb28-13" tabindex="-1"></a>        Node(</span>
+<span id="guide-cb28-14"><a aria-hidden="true" href="#guide-cb28-14" tabindex="-1"></a>            package<span class="op">=</span><span class="st">'hello_robot'</span>,</span>
+<span id="guide-cb28-15"><a aria-hidden="true" href="#guide-cb28-15" tabindex="-1"></a>            executable<span class="op">=</span><span class="st">'check_distance'</span>,</span>
+<span id="guide-cb28-16"><a aria-hidden="true" href="#guide-cb28-16" tabindex="-1"></a>            output<span class="op">=</span><span class="st">'screen'</span>,</span>
+<span id="guide-cb28-17"><a aria-hidden="true" href="#guide-cb28-17" tabindex="-1"></a>        ),</span>
+<span id="guide-cb28-18"><a aria-hidden="true" href="#guide-cb28-18" tabindex="-1"></a>    ])</span></code></pre></div>
+<p><code>LaunchDescription</code> contains the startup actions. Each
+<code>Node(...)</code> action requests that an executable be started.
+The <code>Node</code> imported from <code>launch_ros.actions</code> is a
+launch action; the <code>Node</code> from <code>rclpy.node</code> in our
+earlier programs is the class used to implement a running node. The same
+word appears in two different libraries for related purposes.</p>
+<p><code>parameters=[{'distance_m': 0.75}]</code> supplies a startup
+setting to the sender. Here the braces are a <strong>Python
+dictionary</strong>, because we are inside a Python file. They look
+similar to compact YAML, but the parser reading the file is different.
+<code>output='screen'</code> asks launch to show process output in the
+terminal.</p>
+<h3 id="guide-make-the-launch-file-part-of-the-installed-package">Make the
+launch file part of the installed package</h3>
+<p>In <code>setup.py</code>, add this import near the existing
+imports:</p>
+<div class="sourceCode" id="guide-cb29"><pre class="sourceCode python"><code class="sourceCode python"><span id="guide-cb29-1"><a aria-hidden="true" href="#guide-cb29-1" tabindex="-1"></a><span class="im">from</span> glob <span class="im">import</span> glob</span></code></pre></div>
+<p><code>glob</code> finds files matching a pattern. Find the existing
+<code>data_files</code> list. Keep its generated entries and add the
+following item inside that list, with commas separating the items:</p>
+<div class="sourceCode" id="guide-cb30"><pre class="sourceCode python"><code class="sourceCode python"><span id="guide-cb30-1"><a aria-hidden="true" href="#guide-cb30-1" tabindex="-1"></a>(<span class="st">'share/'</span> <span class="op">+</span> package_name <span class="op">+</span> <span class="st">'/launch'</span>, glob(<span class="st">'launch/*.launch.py'</span>)),</span></code></pre></div>
+<p>This tells installation to put matching launch files in the package’s
+installed share directory. Without it, the file can exist in
+<code>src</code> while <code>ros2 launch</code> still cannot find it by
+package name.</p>
+<p>In <code>package.xml</code>, add these lines alongside the existing
+dependencies, inside <code>&lt;package&gt;</code>, if they are not
+already present:</p>
+<div class="sourceCode" id="guide-cb31"><pre class="sourceCode xml"><code class="sourceCode xml"><span id="guide-cb31-1"><a aria-hidden="true" href="#guide-cb31-1" tabindex="-1"></a>&lt;<span class="kw">exec_depend</span>&gt;launch&lt;/<span class="kw">exec_depend</span>&gt;</span>
+<span id="guide-cb31-2"><a aria-hidden="true" href="#guide-cb31-2" tabindex="-1"></a>&lt;<span class="kw">exec_depend</span>&gt;launch_ros&lt;/<span class="kw">exec_depend</span>&gt;</span></code></pre></div>
+<p>They record that running the launch file needs these two packages.
+Build again from a fresh terminal with only the ROS underlay sourced.
+Then source ROS and the practice overlay in a run terminal, as in
+section 7, and run:</p>
+<div class="sourceCode" id="guide-cb32"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="guide-cb32-1"><a aria-hidden="true" href="#guide-cb32-1" tabindex="-1"></a><span class="ex">ros2</span> launch hello_robot practice.launch.py</span></code></pre></div>
+<p>Both nodes should now start from that one command. The receiver
+should warn because 0.75 is less than 1.0. Ctrl+C in the launch terminal
+requests shutdown of the launched processes. Use
+<code>ros2 node list</code> from another terminal if you need to confirm
+they have stopped.</p>
+<h2 id="guide-robot-files">12. XML, URDF and Xacro: describe a robot’s
+structure</h2>
+<p>You will encounter <strong>URDF</strong> and <strong>Xacro</strong>
+in Lab 2. They describe robot structure; the Python nodes implement the
+behaviour. You do not need a robot-description file for the two distance
+programs we have just built.</p>
+<p><strong>XML</strong> is a text format that structures data using
+tags. In <code>package.xml</code>, for example:</p>
+<div class="sourceCode" id="guide-cb33"><pre class="sourceCode xml"><code class="sourceCode xml"><span id="guide-cb33-1"><a aria-hidden="true" href="#guide-cb33-1" tabindex="-1"></a>&lt;<span class="kw">name</span>&gt;hello_robot&lt;/<span class="kw">name</span>&gt;</span></code></pre></div>
+<p><code>&lt;name&gt;</code> opens the element and
+<code>&lt;/name&gt;</code> closes it. The text between them is its
+value. The following uses an <strong>attribute</strong>, an extra named
+value inside an opening tag:</p>
+<div class="sourceCode" id="guide-cb34"><pre class="sourceCode xml"><code class="sourceCode xml"><span id="guide-cb34-1"><a aria-hidden="true" href="#guide-cb34-1" tabindex="-1"></a>&lt;<span class="kw">link</span><span class="ot"> name=</span><span class="st">"base_link"</span>/&gt;</span></code></pre></div>
+<p>Here <code>link</code> is the element and
+<code>name="base_link"</code> is an attribute. The final
+<code>/&gt;</code> closes an element with no nested contents. When there
+are nested contents, we instead finish with
+<code>&lt;/link&gt;</code>.</p>
+<p><strong>URDF</strong> means <strong>Unified Robot Description
+Format</strong>. It uses XML to describe robot parts and their
+connections. A <strong>link</strong> is a rigid part. A
+<strong>joint</strong> connects one link to another and states how they
+can move relative to each other. A fixed joint means the connection does
+not move.</p>
+<p>This complete small URDF describes a visible rectangular body:</p>
+<div class="sourceCode" id="guide-cb35"><pre class="sourceCode xml"><code class="sourceCode xml"><span id="guide-cb35-1"><a aria-hidden="true" href="#guide-cb35-1" tabindex="-1"></a><span class="fu">&lt;?xml</span><span class="ot"> version=</span><span class="st">"1.0"</span><span class="fu">?&gt;</span></span>
+<span id="guide-cb35-2"><a aria-hidden="true" href="#guide-cb35-2" tabindex="-1"></a>&lt;<span class="kw">robot</span><span class="ot"> name=</span><span class="st">"small_robot"</span>&gt;</span>
+<span id="guide-cb35-3"><a aria-hidden="true" href="#guide-cb35-3" tabindex="-1"></a>  &lt;<span class="kw">link</span><span class="ot"> name=</span><span class="st">"base_link"</span>&gt;</span>
+<span id="guide-cb35-4"><a aria-hidden="true" href="#guide-cb35-4" tabindex="-1"></a>    &lt;<span class="kw">visual</span>&gt;</span>
+<span id="guide-cb35-5"><a aria-hidden="true" href="#guide-cb35-5" tabindex="-1"></a>      &lt;<span class="kw">geometry</span>&gt;</span>
+<span id="guide-cb35-6"><a aria-hidden="true" href="#guide-cb35-6" tabindex="-1"></a>        &lt;<span class="kw">box</span><span class="ot"> size=</span><span class="st">"0.4 0.3 0.2"</span>/&gt;</span>
+<span id="guide-cb35-7"><a aria-hidden="true" href="#guide-cb35-7" tabindex="-1"></a>      &lt;/<span class="kw">geometry</span>&gt;</span>
+<span id="guide-cb35-8"><a aria-hidden="true" href="#guide-cb35-8" tabindex="-1"></a>    &lt;/<span class="kw">visual</span>&gt;</span>
+<span id="guide-cb35-9"><a aria-hidden="true" href="#guide-cb35-9" tabindex="-1"></a>  &lt;/<span class="kw">link</span>&gt;</span>
+<span id="guide-cb35-10"><a aria-hidden="true" href="#guide-cb35-10" tabindex="-1"></a>&lt;/<span class="kw">robot</span>&gt;</span></code></pre></div>
+<p>The size gives the box’s x, y and z lengths in metres: 40 cm, 30 cm
+and 20 cm. <code>visual</code> describes the appearance to draw. This
+minimal example does not supply the mass, collision properties,
+actuators and simulation configuration needed for a useful moving
+physics model. Lab 2 adds another link and a fixed joint, then displays
+the model.</p>
+<p><strong>Xacro</strong> means XML macros. It adds features for reusing
+values and blocks of XML. A macro is a reusable definition that can
+generate repeated content. Xacro also supports properties, which act as
+named values, and arithmetic expressions. A Xacro processor expands
+these features into ordinary XML, commonly a URDF robot description.</p>
+<p>For example, this is a complete small Xacro input:</p>
+<div class="sourceCode" id="guide-cb36"><pre class="sourceCode xml"><code class="sourceCode xml"><span id="guide-cb36-1"><a aria-hidden="true" href="#guide-cb36-1" tabindex="-1"></a><span class="fu">&lt;?xml</span><span class="ot"> version=</span><span class="st">"1.0"</span><span class="fu">?&gt;</span></span>
+<span id="guide-cb36-2"><a aria-hidden="true" href="#guide-cb36-2" tabindex="-1"></a>&lt;<span class="kw">robot</span><span class="ot"> name=</span><span class="st">"small_robot"</span><span class="ot"> xmlns:xacro=</span><span class="st">"http://www.ros.org/wiki/xacro"</span>&gt;</span>
+<span id="guide-cb36-3"><a aria-hidden="true" href="#guide-cb36-3" tabindex="-1"></a>  &lt;<span class="kw">xacro:property</span><span class="ot"> name=</span><span class="st">"body_length"</span><span class="ot"> value=</span><span class="st">"0.4"</span>/&gt;</span>
+<span id="guide-cb36-4"><a aria-hidden="true" href="#guide-cb36-4" tabindex="-1"></a>  &lt;<span class="kw">link</span><span class="ot"> name=</span><span class="st">"base_link"</span>&gt;</span>
+<span id="guide-cb36-5"><a aria-hidden="true" href="#guide-cb36-5" tabindex="-1"></a>    &lt;<span class="kw">visual</span>&gt;</span>
+<span id="guide-cb36-6"><a aria-hidden="true" href="#guide-cb36-6" tabindex="-1"></a>      &lt;<span class="kw">geometry</span>&gt;</span>
+<span id="guide-cb36-7"><a aria-hidden="true" href="#guide-cb36-7" tabindex="-1"></a>        &lt;<span class="kw">box</span><span class="ot"> size=</span><span class="st">"${body_length} 0.3 0.2"</span>/&gt;</span>
+<span id="guide-cb36-8"><a aria-hidden="true" href="#guide-cb36-8" tabindex="-1"></a>      &lt;/<span class="kw">geometry</span>&gt;</span>
+<span id="guide-cb36-9"><a aria-hidden="true" href="#guide-cb36-9" tabindex="-1"></a>    &lt;/<span class="kw">visual</span>&gt;</span>
+<span id="guide-cb36-10"><a aria-hidden="true" href="#guide-cb36-10" tabindex="-1"></a>  &lt;/<span class="kw">link</span>&gt;</span>
+<span id="guide-cb36-11"><a aria-hidden="true" href="#guide-cb36-11" tabindex="-1"></a>&lt;/<span class="kw">robot</span>&gt;</span></code></pre></div>
+<p>The namespace declaration makes the <code>xacro:</code> prefix
+available. It identifies the vocabulary; processing this file does not
+require downloading that URL. The property assigns <code>0.4</code> to
+<code>body_length</code>. <code>${body_length}</code> asks Xacro to
+substitute its value. The generated box has the same dimensions as
+before.</p>
+<p>If you save this example as
+<code>~/beginner_ws/small_robot.urdf.xacro</code>, you can expand it in
+a terminal with ROS sourced and Xacro installed:</p>
+<div class="sourceCode" id="guide-cb37"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="guide-cb37-1"><a aria-hidden="true" href="#guide-cb37-1" tabindex="-1"></a><span class="ex">xacro</span> ~/beginner_ws/small_robot.urdf.xacro <span class="op">&gt;</span> ~/beginner_ws/small_robot.urdf</span></code></pre></div>
+<p>The command creates an output file. It does not start a simulation or
+open RViz. In Lab 2, a launch file processes a description and supplies
+it as the string parameter <code>robot_description</code> to
+<code>robot_state_publisher</code>, which computes relationships between
+robot parts from the model and joint positions.</p>
+<div aria-label="Scrollable reference table" class="table-scroll" role="region" tabindex="0"><table>
+<colgroup>
+<col style="width: 33%"/>
+<col style="width: 33%"/>
+<col style="width: 33%"/>
+</colgroup>
+<thead>
+<tr class="header">
+<th>File or format</th>
+<th>What it describes</th>
+<th>Example use</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>.py</code></td>
+<td>Python instructions</td>
+<td>Process a distance reading</td>
+</tr>
+<tr class="even">
+<td><code>.yaml</code></td>
+<td>Structured configuration data</td>
+<td>Set a node’s threshold</td>
+</tr>
+<tr class="odd">
+<td><code>package.xml</code></td>
+<td>ROS package metadata written as XML</td>
+<td>Declare dependencies</td>
+</tr>
+<tr class="even">
+<td><code>.urdf</code></td>
+<td>Robot links and joints written as XML</td>
+<td>Describe the body and sensor mount</td>
+</tr>
+<tr class="odd">
+<td><code>.urdf.xacro</code></td>
+<td>A description with Xacro substitutions/macros</td>
+<td>Reuse dimensions before generating URDF</td>
+</tr>
+<tr class="even">
+<td><code>.launch.py</code></td>
+<td>Startup actions written in Python</td>
+<td>Start the model publisher and viewer</td>
+</tr>
+<tr class="odd">
+<td><code>.sdf</code></td>
+<td>Simulation descriptions using SDFormat</td>
+<td>Describe a Gazebo world, models and physics-related settings</td>
+</tr>
+</tbody>
+</table></div>
+<p>A file extension helps you recognise the expected format, but the
+contents still have to obey that format. YAML, XML and Python are read
+by different parsers. A <strong>parser</strong> is software that reads
+text according to a format’s rules. An indentation error in YAML and a
+missing closing tag in XML are different kinds of parsing failure.</p>
+<h2 id="guide-names-delivery">13. Names and delivery settings: why connected
+programs can still be silent</h2>
+<p>A <strong>remapping</strong> changes a ROS name for one run without
+editing the source. Stop previous practice nodes, then start a sender
+like this:</p>
+<div class="sourceCode" id="guide-cb38"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="guide-cb38-1"><a aria-hidden="true" href="#guide-cb38-1" tabindex="-1"></a><span class="ex">ros2</span> run hello_robot send_distance <span class="at">--ros-args</span> <span class="at">-r</span> practice_distance:=test_distance</span></code></pre></div>
+<p><code>-r</code> introduces a remapping. The topic written as
+<code>practice_distance</code> in the code now resolves to
+<code>/test_distance</code>. A receiver still listening to
+<code>/practice_distance</code> will not receive that stream. You can
+restore the original sender command or start the receiver with the same
+remapping.</p>
+<p>A <strong>namespace</strong> adds a shared prefix to relative ROS
+names. Starting both practice programs with
+<code>--ros-args -r __ns:=/team_a</code> makes their relative topic
+<code>practice_distance</code> become
+<code>/team_a/practice_distance</code>. The node names also gain the
+prefix. An absolute topic name written with an initial slash, such as
+<code>/scan</code>, does not gain that prefix. A namespace organises ROS
+names; it does not move the robot physically or transform
+coordinates.</p>
+<p><strong>Quality of Service</strong>, abbreviated
+<strong>QoS</strong>, means delivery settings used by publishers and
+subscriptions. For example, a sender may prioritise fresh sensor
+readings and allow some loss, or it may use reliable delivery. Both ends
+need compatible settings, not necessarily identical settings. Inspect
+them with:</p>
+<div class="sourceCode" id="guide-cb39"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="guide-cb39-1"><a aria-hidden="true" href="#guide-cb39-1" tabindex="-1"></a><span class="ex">ros2</span> topic info /practice_distance <span class="at">--verbose</span></span></code></pre></div>
+<p>A subscription requesting reliable delivery cannot match a publisher
+offering only best-effort reliability. Lab 2 explains this when you
+connect to a sensor. Our first publisher and subscriber use matching
+default settings, so we can learn the program structure before dealing
+with sensor-specific delivery choices.</p>
+<p>The <strong>ROS domain ID</strong> groups participants for discovery.
+It is one of the settings that determines which nodes can find one
+another; it is not authentication or a security boundary. The course VM
+sets the communication environment. If programs unexpectedly cannot
+discover one another, compare their terminal setup and follow the
+course’s environment checks.</p>
+<h2 id="guide-repair-guide">14. Follow the failure to the correct stage</h2>
+<p>Keep source files in <code>src</code>, build from the workspace root
+and run from a terminal that has sourced the installed workspace. These
+are three separate stages. Diagnose the one that failed.</p>
+<div aria-label="Scrollable reference table" class="table-scroll" role="region" tabindex="0"><table>
+<colgroup>
+<col style="width: 33%"/>
+<col style="width: 33%"/>
+<col style="width: 33%"/>
+</colgroup>
+<thead>
+<tr class="header">
+<th>What you see</th>
+<th>What to check first</th>
+<th>Why</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>ros2: command not found</code></td>
+<td>Source <code>/opt/ros/jazzy/setup.bash</code></td>
+<td>This shell cannot locate the ROS tool.</td>
+</tr>
+<tr class="even">
+<td>Package not found</td>
+<td>Build successfully, then source the workspace; inspect
+<code>ros2 pkg prefix hello_robot</code></td>
+<td>ROS needs to find the installed package.</td>
+</tr>
+<tr class="odd">
+<td>Executable not found</td>
+<td>Check <code>console_scripts</code>, rebuild, then use
+<code>ros2 pkg executables hello_robot</code></td>
+<td>An existing <code>.py</code> file alone is not an executable
+registration.</td>
+</tr>
+<tr class="even">
+<td>Python import error</td>
+<td>Check module spelling and dependencies</td>
+<td>The program started but could not load required code.</td>
+</tr>
+<tr class="odd">
+<td>Node exists but no message appears</td>
+<td>Check sender activity, topic name, type and QoS</td>
+<td>Being discoverable does not prove data is flowing.</td>
+</tr>
+<tr class="even">
+<td>Parameter changes but behaviour does not</td>
+<td>Find where the code reads and applies that parameter</td>
+<td>The setting and the algorithm are related only through the
+implementation.</td>
+</tr>
+<tr class="odd">
+<td>Launch file not found</td>
+<td>Check its <code>data_files</code> installation rule and rebuild</td>
+<td>Launch searches the installed package.</td>
+</tr>
+</tbody>
+</table></div>
+<p>For this Python workspace,
+<code>rosdep install --from-paths src --ignore-src -r -y</code>, run
+from <code>~/beginner_ws</code>, can resolve declared dependencies when
+rosdep is configured. <code>--from-paths src</code> tells it where to
+read package declarations; <code>--ignore-src</code> skips dependencies
+already supplied as source packages; <code>-r</code> continues
+processing after errors; <code>-y</code> accepts installation prompts.
+Read the final result. Recording dependencies and successfully
+installing them are separate steps, and installation may need network
+access and administrator credentials.</p>
+<p><code>colcon test --packages-select hello_robot</code> runs the
+package’s registered tests. <code>colcon test-result --verbose</code>
+reports the outcomes. The generated tests largely inspect style and
+metadata. Our input checks with 0.25, 1.0 and 1.5 are behavioural
+checks: they examine whether the decision agrees with its
+requirement.</p>
+<p>If discovery information seems stale after stopping programs,
+<code>ros2 daemon stop</code> followed by <code>ros2 daemon start</code>
+restarts the background helper used by some command-line discovery
+operations. It does not restart your nodes or repair their code.</p>
+<h3 id="guide-keep-the-idea-not-just-the-command">Keep the idea, not just the
+command</h3>
+<p>Before running a command, say what evidence you want: “I want to know
+whether the node exists,” “I want to read one actual measurement,” or “I
+want to check what this field means.” Then choose
+<code>node list</code>, <code>topic echo</code> or
+<code>interface show</code> accordingly. This is how the commands become
+useful in a new project whose package names you have never seen
+before.</p>
+<p>Stop the practice nodes before returning to the course labs. Use the
+course’s terminal setup for the course workspace and
+<code>student_ws</code>; this separate practice package is not a
+prerequisite for running Lab 1.</p>
+<h2 id="guide-guide-references">Documentation behind this chapter</h2>
+<p>These links open the official documentation. Select
+<strong>Jazzy</strong> when comparing commands with the course VM. The
+examples above are written for this reader; the references let you check
+the mechanisms and explore further.</p>
+<ul>
+<li><a href="https://docs.ros.org/en/jazzy/Concepts/Basic.html">ROS 2
+basic concepts</a>: nodes, communication and the ROS graph.</li>
+<li><a href="https://docs.ros.org/en/jazzy/Tutorials/Beginner-Client-Libraries/Creating-A-Workspace/Creating-A-Workspace.html">Creating
+a workspace</a>: source, build and overlay setup.</li>
+<li><a href="https://docs.ros.org/en/jazzy/Tutorials/Beginner-Client-Libraries/Creating-Your-First-ROS2-Package.html">Creating
+a package</a>: generated Python package files and executable
+registration.</li>
+<li><a href="https://docs.ros.org/en/jazzy/Tutorials/Beginner-Client-Libraries/Writing-A-Simple-Py-Publisher-And-Subscriber.html">Python
+publisher and subscriber</a>: node construction, messages and
+callbacks.</li>
+<li><a href="https://docs.ros.org/en/jazzy/Concepts/Basic/About-Parameters.html">Parameters</a>:
+node settings, types and runtime changes.</li>
+<li><a href="https://docs.ros.org/en/jazzy/How-To-Guides/Topics-Services-Actions.html">Topics,
+services and actions</a>: choosing a communication pattern.</li>
+<li><a href="https://docs.ros.org/en/jazzy/Tutorials/Intermediate/Launch/Launch-system.html">Integrating
+launch files</a>: installing and running launch descriptions.</li>
+<li><a href="https://docs.ros.org/en/jazzy/Tutorials/Intermediate/URDF/Building-a-Visual-Robot-Model-with-URDF-from-Scratch.html">Building
+a visual URDF model</a> and <a href="https://docs.ros.org/en/jazzy/Tutorials/Intermediate/URDF/Using-Xacro-to-Clean-Up-a-URDF-File.html">using
+Xacro</a>: robot-description syntax and expansion.</li>
+<li><a href="https://yaml.org/spec/1.2.2/">YAML specification</a>: the
+data format itself. You do not need to read the specification to
+complete these labs.</li>
+<li><a href="https://gazebosim.org/docs/harmonic/ros2_overview/">Gazebo
+and ROS 2</a> and <a href="http://sdformat.org/spec">SDFormat</a>:
+simulation integration and simulation-description files.</li>
+</ul>

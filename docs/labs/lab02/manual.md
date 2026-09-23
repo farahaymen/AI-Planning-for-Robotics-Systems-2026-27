@@ -1,629 +1,171 @@
----
-title: "Lab 2: Mobile Robot Kinematics, TF2, URDF and ros2_control"
-subtitle: "Autonomous Robotics with ROS 2: Mapping, Navigation and Reinforcement Learning"
-author: "British University in Egypt"
-date: "Duration 2 hours | ARC VM 2026.1"
----
+# Lab 2: Give the messages a robot, then make it move
 
-# Lab 2: Mobile Robot Kinematics, TF2, URDF and ros2_control
+In Lab 1, a publisher sent numbers and a subscriber used them. A robot uses the same idea, but a number now needs a physical meaning. A distance must be measured from somewhere. A velocity must refer to a direction. A program needs feedback to find out whether the robot actually moved.
 
-**Course** Autonomous Robotics with ROS 2: Mapping, Navigation and Reinforcement Learning
-**Duration** 2 hours
-**Environment** ARC VM 2026.1 (Ubuntu 24.04, ROS 2 Jazzy, Gazebo Harmonic)
-**Packages** `arc_description`, `arc_gazebo`, `robot_state_publisher`, `tf2_ros`, `tf2_tools`, `ros2_control`, `diff_drive_controller`, `xacro`
+**By the end, you will drive the robot in Gazebo, measure its movement through ROS, and build a movement rule in your own package.** A stationary model is the first observation, not the final outcome. Allow about 25 minutes for models and frames, 35 for simulated motion and sensors, 45 for your controller, and 15 for evidence.
 
-**Prerequisites**
+## One robot, two different kinds of software
 
-Lab 1. You should be able to inspect a running graph and diagnose a QoS mismatch
-without being told to. Basic trigonometry and matrix multiplication.
+**RViz** is a viewer. It draws information that ROS nodes publish, including geometry, laser measurements and coordinate axes. **Gazebo** is a simulator. It advances a model of the world, calculates physical motion and produces simulated sensor measurements. Moving a wheel slider in RViz changes a displayed joint angle. Driving in Gazebo changes the robot's location in a simulated room.
 
----
-
-## Before the session
-
-The kinematics below is the mathematical content of this lab, and it is arithmetic
-you can do at home. Working through it now is what makes the two hours in the
-laboratory available for the robot description and the transform tree, which are
-harder to learn from a page.
-
-### Why this lab matters
-
-In Lab 1 your messages carried a number that meant nothing. From today they carry
-physical quantities, and physical quantities have to be consistent with a real
-object or the whole stack quietly produces nonsense.
-
-Two numbers govern almost everything. The wheel radius converts wheel rotation
-into distance travelled. The wheel separation converts a difference in wheel
-speeds into a rotation rate. Get either slightly wrong and the robot still drives,
-still reports odometry, still looks completely healthy, and ends up somewhere
-other than where it believes it is. In Lab 5 that error will make your map
-smear. In Lab 6 it will make Nav2 overshoot goals. No error message will appear
-at any point.
-
-The same is true of coordinate frames. A LiDAR mounted ten centimetres forward of
-the chassis centre reports obstacles ten centimetres closer than they are, unless
-something tells the rest of the system where the sensor sits. That something is
-TF2, and it is the piece of ROS that most people find confusing for longest.
-
-### Differential drive kinematics
-
-The robot has two independently driven wheels on a common axis and a passive
-caster. Let $r$ be the wheel radius, $L$ the separation between the wheel
-contact points, and $\omega_L$, $\omega_R$ the wheel angular velocities.
-
-**Forward kinematics** answers "the wheels are turning at these speeds, how is
-the body moving?"
-
-$$
-v = \frac{r(\omega_R + \omega_L)}{2}
-\qquad
-\omega = \frac{r(\omega_R - \omega_L)}{L}
-$$
-
-The structure is worth reading rather than memorising. The average of the wheel
-speeds gives forward motion, and the difference gives rotation. Equal speeds
-produce a straight line. Equal and opposite speeds produce rotation on the spot.
-
-**Inverse kinematics** answers "I want the body to move like this, what should
-the wheels do?" This is the direction the controller uses, because Nav2 will hand
-you a `geometry_msgs/Twist` and the hardware needs wheel commands.
-
-$$
-\omega_L = \frac{v - \omega L / 2}{r}
-\qquad
-\omega_R = \frac{v + \omega L / 2}{r}
-$$
-
-Substitute one into the other and you get back where you started, which is a
-useful check and is exactly what one of the supplied unit tests does.
-
-![The differential drive model. Course constants shown are the frozen values in `RobotSpec`.](docs/figures/lab02_diff_drive.png){width=82%}
-
-
-Try the arithmetic once with the course constants, $r = 0.050$ m and
-$L = 0.350$ m. At the robot's limits of $v = 0.50$ m/s and
-$\omega = 1.80$ rad/s together, the outer wheel needs
-
-$$
-\omega_R = \frac{0.50 + 1.80 \times 0.175}{0.050} = 16.3 \ \text{rad/s}
-$$
-
-That number has a consequence you will see in the hardware interface, and it is
-the sort of consistency check that separates a robot description that works from
-one that appears to.
-
-**Odometry** integrates the twist over time to estimate pose. The obvious version
-is
-
-$$
-x \mathrel{+}= v \cos\theta \, \Delta t, \quad
-y \mathrel{+}= v \sin\theta \, \Delta t, \quad
-\theta \mathrel{+}= \omega \Delta t
-$$
-
-and it is what most tutorials show. It approximates each control period as a
-straight line, which is wrong whenever the robot is turning. When
-$\omega \neq 0$ the robot actually traces an arc of radius $R = v / \omega$, and
-integrating the arc exactly costs three extra lines:
-
-$$
-x \mathrel{+}= R\left(\sin(\theta + \omega \Delta t) - \sin\theta\right), \quad
-y \mathrel{-}= R\left(\cos(\theta + \omega \Delta t) - \cos\theta\right), \quad
-\theta \mathrel{+}= \omega \Delta t
-$$
-
-Read `starters/lab02/diffdrive.py` before the session. It implements all of the
-above in about sixty lines, and the tests alongside it demonstrate that a
-thousand small steps around a full circle return to the origin, which the
-straight line version does not.
-
-### Coordinate frames
-
-ROS uses a small set of conventional frames, and the convention exists so that
-software written by different people composes without negotiation.
-
-`base_link` is rigidly attached to the chassis. `base_footprint` is its
-projection onto the ground plane, which is what navigation reasons about because
-the robot drives on a floor. `odom` is a frame in which the robot's pose is
-continuous and smooth but drifts without bound, because it comes from integrating
-wheel motion. `map` is a frame in which the pose does not drift but does jump,
-because it comes from matching sensor data against a map.
-
-The relationship between those last two is the important idea. Odometry is
-smooth and wrong. Localisation is correct and discontinuous. Rather than choosing,
-ROS keeps both and expresses the correction as the `map` to `odom` transform,
-published by AMCL from Lab 5. Anything needing smooth motion, such as a
-controller, uses `odom`. Anything needing global correctness, such as a goal pose,
-uses `map`.
-
-The full chain on our robot is
-
-![The transform tree. Each edge has exactly one publisher.](docs/figures/diagram_tf_tree.png){width=72%}
-
-Each transform has exactly one publisher. Two publishers for the same edge is a
-real failure mode, it usually means something was launched twice, and the symptom
-is a robot that jitters between two positions in RViz.
-
-### URDF, Xacro and robot_state_publisher
-
-The robot description is an XML document listing links, which are rigid bodies
-with visual, collision and inertial properties, and joints, which are the
-relationships between them. Fixed joints never move. Continuous joints rotate
-without limit, which is what wheels do.
-
-URDF is verbose, so we write Xacro, which adds properties, macros and arithmetic
-and expands to URDF. The wheel macro in `arc_bot.urdf.xacro` is instantiated
-twice with a sign flip, which is both shorter and safer than writing the same
-twenty lines twice with one number changed.
-
-`robot_state_publisher` reads the description, subscribes to `/joint_states`, and
-publishes the transforms for every joint. Fixed joints are published once as
-static transforms. Moving joints are republished continuously. This is why
-adding a sensor to the URDF is all you need to do to make its frame available to
-the entire system.
-
-### ros2_control
-
-Between "the controller wants 0.3 m/s" and "the motor spins" there is a layer
-that nobody enjoys writing twice. `ros2_control` is that layer, and it splits
-into two halves that meet at a defined interface.
-
-A **hardware interface** exposes named command interfaces, such as the velocity
-of `left_wheel_joint`, and named state interfaces, such as its position. In
-simulation this is provided by `gz_ros2_control`. On a physical robot it is a
-small C++ class that talks to a motor driver over CAN, EtherCAT or a serial link.
-
-A **controller** consumes those interfaces without knowing what is behind them.
-`diff_drive_controller` subscribes to `/cmd_vel`, applies the inverse kinematics
-you worked through above, writes wheel velocity commands, reads back wheel
-positions, integrates odometry and publishes the `odom` to `base_footprint`
-transform.
-
-The consequence is the part worth remembering. Moving this course's software from
-Gazebo to a physical robot means replacing one plugin declaration. The
-controller configuration, Nav2, and everything you write for the rest of the
-semester stays identical. That substitutability is why the layer exists and why
-it is worth the ceremony.
-
----
-
-> ### Industry Perspective: the hardware boundary
->
-> The hardware interface is where robotics software meets electrical engineering,
-> and it is the part of a robot that is almost never open source, because it is
-> specific to the motors and drivers a company chose.
->
-> Underneath it sits a fieldbus. **CAN bus** is common on mobile robots and
-> vehicles, is robust to electrical noise, and is slow enough that you think about
-> message budgets. **EtherCAT** dominates industrial applications needing
-> synchronised control of many joints at high rates, and offers deterministic
-> cycle times in the sub-millisecond range. Plain **UART or RS-485** is still
-> everywhere on small robots because it is simple and adequate.
->
-> Two engineering realities follow. First, the control loop rate is bounded by
-> the bus and the driver firmware, not by your Python. Second, and less obvious,
-> the wheel radius in your configuration is not the manufacturer's specification.
-> It is the effective rolling radius, which changes with tyre pressure, load and
-> wear. Commissioning a real AMR includes driving a measured distance and
-> adjusting the number until reported odometry matches reality. Exercise 2.4 is a
-> simulated version of that procedure, and it is a task you would genuinely be
-> asked to do in an internship.
-
----
-
-### Pre-lab quiz
-
-Five questions on the VLE covering the forward and inverse kinematics, the
-purpose of `base_footprint` versus `base_link`, why `map` to `odom` exists, what
-`robot_state_publisher` needs in order to publish a transform, and what the
-hardware interface abstracts.
-
----
-
-## In the session
-
-### Stage 0: health check and bring-up (10 minutes)
-
-```
-course-check
+```bash
 ros2 launch arc_description display.launch.py
 ```
 
-This starts `robot_state_publisher`, a joint state publisher with sliders, and
-RViz. No simulator and no physics yet, because today is about the description
-rather than the dynamics.
+`ros2 launch` reads a launch file, which starts several programs with their settings. This launch starts a robot state publisher, a joint slider window and RViz. Move a wheel slider. The wheel rotates but the body stays in place. This is correct for the display launch. Stop it with Ctrl+C before starting Gazebo later; otherwise both launches publish descriptions and transforms for the same robot.
 
-**[SCREENSHOT PLACEHOLDER]**
-RViz showing the robot model with the TF display enabled, all frames visible, and
-the joint state slider panel alongside.
-*Instructor note: set the RViz fixed frame to `base_footprint` and enable both
-RobotModel and TF displays. Set the TF marker scale large enough that the axes at
-`laser_link` are clearly offset forward from `base_link`, since that offset is
-the point of the whole lab.*
+Open `arc_description/urdf/arc_bot.urdf.xacro`. A **link** is a rigid part, such as the body. A **joint** connects two links and says how they can move relative to each other. A wheel joint rotates. The laser mount is fixed.
 
-### Stage 1: demonstration and the fault (15 minutes)
+**URDF**, Unified Robot Description Format, uses XML text with named tags such as `<link>`. **Xacro** adds reusable expressions and repeated structures. Processing Xacro produces URDF text; it does not start a robot. The launch supplies that text as a string using `ParameterValue(..., value_type=str)`. This avoids interpreting the XML as YAML configuration.
 
-Your demonstrator will drive the robot, show the transform tree, then break one
-relationship in the description and hand it back. Diagnosing it is part of the
-exit task.
+| Element | Meaning | Effect of a mistake |
+|---|---|---|
+| `visual` | Shape drawn on screen | Incorrect appearance |
+| `collision` | Shape tested for contact | Incorrect interaction with walls |
+| `inertial` | Mass and resistance to angular acceleration | Incorrect physical response |
 
-### Exercise 2.1: read the tree (15 minutes)
+As an extension, build a two-link visual model using `teaching/building/robot_workshop/urdf/student_robot.urdf` and its launch file. That small model lacks wheel control and complete physics; we drive the supplied physical model today.
 
-```
-ros2 run tf2_tools view_frames
-evince frames.pdf
-ros2 run tf2_ros tf2_echo base_link laser_link
-ros2 topic echo /robot_description --once | head -40
-```
+## Where does a measurement begin?
 
-`tf2_echo` prints the translation and rotation between any two frames. Compare
-the translation it reports for `base_link` to `laser_link` against the origin in
-the `laser_joint` block of `arc_bot.urdf.xacro`. They must agree, because one
-produced the other.
+A **coordinate frame** is an origin and named directions. For the body, x points forward, y left and z upward. Distances are in metres. Angles normally use radians: a full turn is $2\pi$, approximately 6.28 radians.
 
-Record in your exit task: how many frames exist, which node publishes each edge,
-and which edges are static.
+`base_link` belongs to the body; `laser_link` belongs to the sensor. The laser is 0.10 m ahead of the body origin and 0.12 m above it. A wall 1.00 m directly ahead of the laser is therefore 1.10 m ahead of the body origin when both frames have the same orientation.
 
-### Exercise 2.2: add a sensor frame (20 minutes)
+![The body, laser and wheels have separate frames. Odometry gives the moving robot a local reference.](../../figures/nine/lab02_flow.png)
 
-Add a mounting point for a camera you will not use until later. The point is the
-procedure, not the camera.
-
-**Code 2.1: A new link and fixed joint in the robot description**
-
-```xml
-<!-- Add to arc_bot.urdf.xacro, before the include lines at the bottom -->
-
-<link name="camera_link">
-  <visual>
-    <geometry><box size="0.03 0.09 0.025"/></geometry>
-    <material name="arc_dark"><color rgba="0.15 0.15 0.18 1"/></material>
-  </visual>
-  <collision>
-    <geometry><box size="0.03 0.09 0.025"/></geometry>
-  </collision>
-  <inertial>
-    <mass value="0.08"/>
-    <inertia ixx="1e-5" iyy="1e-5" izz="1e-5" ixy="0" ixz="0" iyz="0"/>
-  </inertial>
-</link>
-
-<joint name="camera_joint" type="fixed">
-  <parent link="base_link"/>
-  <child link="camera_link"/>
-  <origin xyz="${base_length/2 - 0.01} 0 ${base_height/2 + 0.03}" rpy="0 0.15 0"/>
-</joint>
-
-<!-- Cameras in ROS use z forward and x right, while the robot uses x forward.
-     Rather than arguing with either convention, publish a second frame that is
-     the same physical point with the optical axes. Every ROS camera driver does
-     this, and code that ignores it produces images that appear rotated. -->
-<link name="camera_optical_link"/>
-<joint name="camera_optical_joint" type="fixed">
-  <parent link="camera_link"/>
-  <child link="camera_optical_link"/>
-  <origin xyz="0 0 0" rpy="-1.5707963 0 -1.5707963"/>
-</joint>
-```
-
-Two details matter more than they look.
-
-Every link with a collision element needs an inertial element with non-zero mass.
-A link without one is silently ignored by some physics engines and causes
-solver instability in others, and the failure appears in Lab 3 as a robot that
-sinks through the floor or vibrates.
-
-The optical frame is not pedantry. The camera convention and the robot convention
-genuinely differ, and publishing both frames costs four lines and prevents an
-entire class of confusion later.
-
-Rebuild and verify. Notice that you changed only the description:
-
-```
-colcon build --packages-select arc_description --symlink-install
-source install/setup.bash
-ros2 launch arc_description display.launch.py
-ros2 run tf2_ros tf2_echo base_link camera_optical_link
-```
-
-The transform now exists across the whole system with no code written anywhere.
-
-### Exercise 2.3: fix a broken transform (15 minutes)
-
-Open `arc_description/urdf/broken_tf.urdf.xacro`, which contains one deliberate
-error. Do not read it looking for the mistake. Run it and diagnose it.
-
-```
-ros2 launch arc_description display.launch.py model:=broken_tf.urdf.xacro
-ros2 run tf2_tools view_frames
+```bash
 ros2 run tf2_ros tf2_echo base_link laser_link
 ```
 
-Symptoms map to causes in a small number of ways, and knowing the mapping is the
-skill:
+This runs a transform viewer. A **transform** describes one frame's position and orientation relative to another. `tf2` stores these relationships and follows connected paths through them. Stop the repeating output with Ctrl+C, then inspect a joint message:
 
-| Symptom | Likely cause |
-|---------|--------------|
-| `tf2_echo` reports the frame does not exist | The link is not in the description, or a typo in the name |
-| Two disconnected trees in `frames.pdf` | A joint names a parent that is not a link |
-| Sensor data appears in the wrong place | Wrong `origin` on the joint |
-| Frames flicker between two positions | Two publishers for the same transform |
-| "Lookup would require extrapolation into the future" | Timing, not geometry, and you will meet it properly in Lab 3 |
+```bash
+ros2 topic echo /joint_states --once
+```
 
-Record the symptom, the command that revealed it, and the fix.
+An initial “frame does not exist” message followed by correct values can be a discovery delay. Repeated correct transforms show that the relationship became available. A fixed mount may appear at time 0.0 because its transform is static. This does not show whether simulation time is advancing.
 
-### Exercise 2.4: the wheel radius, measured (20 minutes)
+## How two wheels move a body
 
-This is the exercise that connects the arithmetic to something observable.
+The robot uses **differential drive**, two independently driven wheels. Equal wheel speeds produce straight motion in the ideal model. Unequal speeds turn the body.
 
-Predict first. If the controller is told the wheels are 0.055 m in radius when
-they are physically 0.050 m, and the robot actually travels 2.0 m, what distance
-will the odometry report?
+Let $r$ be wheel radius, $b$ wheel separation, and $\omega_L,\omega_R$ wheel angular speeds. Wheel speed along the ground is radius multiplied by angular speed. Forward body speed is their average; turning speed depends on their difference:
+
+$$v=\frac{r}{2}(\omega_R+\omega_L),\qquad
+\omega=\frac{r}{b}(\omega_R-\omega_L).$$
+
+Here $r=0.05$ m and $b=0.35$ m. If both wheels turn at 3 rad/s, the body moves at $0.05\times3=0.15$ m/s. A faster right wheel turns the body left, positive yaw. These equations assume rolling without slip; the physical simulation can depart from that assumption.
+
+ROS normally requests body velocity. A `geometry_msgs/msg/Twist` message contains `linear` and `angular` vectors. We use `linear.x` for forward speed in m/s and `angular.z` for turning speed in rad/s. Other components stay zero.
+
+## Make the robot travel through the room
+
+Stop the display launch and start Gazebo:
+
+```bash
+ros2 launch arc_gazebo simulation.launch.py
+```
+
+The launch spawns the robot, connects its sensors to ROS and activates wheel controllers. Wait for these processes to finish starting. If the VM cannot handle the Gazebo window, use `headless:=true` with this same launch. Physics still runs. To view that running simulation in RViz, use another prepared terminal:
+
+```bash
+rviz2 -d "$(ros2 pkg prefix arc_gazebo)/share/arc_gazebo/rviz/simulation.rviz"
+```
+
+Discover the interfaces:
+
+```bash
+ros2 node list
+ros2 topic list -t
+ros2 control list_controllers
+ros2 interface show geometry_msgs/msg/Twist
+ros2 topic echo /odom --once
+```
+
+`node list` finds components. `topic list -t` gives channel names and types. Both wheel-related controllers should be active. `/odom` reports estimated local position and velocity derived from wheel motion. It is feedback, not exact world truth. Its coordinates may begin at zero although Gazebo spawns the body at world position (1,1).
+
+In another terminal run:
+
+```bash
+ros2 run arc_course drive_distance --ros-args -p use_sim_time:=true -p distance:=0.6 -p speed:=0.15
+```
+
+The executable is `drive_distance`, in package `arc_course`. `--ros-args` introduces ROS settings; `-p` sets a named parameter. The node requests 0.15 m/s until odometry displacement reaches 0.6 m, then publishes zero. It waits for fresh odometry and a clear forward laser sector. You should see the body move and a completion message with measured displacement. Small stopping error is expected because feedback and physics arrive at finite intervals.
+
+Commands travel through `/cmd_vel`. A relay adds the timestamp required by Jazzy's `diff_drive_controller`, which accepts `TwistStamped`. The controller calculates wheel motion, Gazebo updates the robot, and odometry returns measured movement. That is a **feedback loop**.
+
+## Build the decision in your own node
+
+Continue `robot_workshop` from Lab 1. Copy the supplied scaffold `teaching/building/robot_workshop/robot_workshop/drive_distance.py` into the Python module directory of your student package. Read its subscriptions and timer. Create `robot_workshop/motion_rule.py` beside it. **You write this rule**:
 
 ```python
-from diffdrive import odometry_scale_error
-print(odometry_scale_error(assumed_radius=0.055, true_radius=0.050))
+def command_speed(travelled, target, speed):
+    if travelled < target:
+        return speed
+    return 0.0
 ```
 
-Now measure it. Start the simulation, inspect the controllers, drive a known
-distance, and read the odometry.
+Inputs are measured displacement, requested displacement and chosen speed. The output is a forward velocity. The driver calls this only when sensor checks allow motion. Trace a timer tick: receive position, calculate displacement, evaluate your rule, place its answer in `command.linear.x`, publish.
 
-```
-ros2 launch arc_gazebo simulation.launch.py headless:=true
-```
-
-**Code 2.2: Driving a fixed distance and reading the reported result**
+Add this entry to the existing `console_scripts` list in your student's `setup.py`:
 
 ```python
-#!/usr/bin/env python3
-"""Drive straight for a fixed duration and report what odometry claims."""
-
-import math
-
-import rclpy
-from rclpy.node import Node
-from geometry_msgs.msg import Twist
-from nav_msgs.msg import Odometry
-
-
-class OdomRuler(Node):
-    def __init__(self, speed=0.2, duration=10.0):
-        super().__init__("odom_ruler")
-        self.speed, self.duration = speed, duration
-        self.publisher = self.create_publisher(Twist, "/cmd_vel", 10)
-        self.create_subscription(Odometry, "/odom", self.on_odom, 10)
-        self.start = None
-        self.travelled = 0.0
-        self.last = None
-        self.create_timer(0.05, self.tick)
-
-    def on_odom(self, msg):
-        p = msg.pose.pose.position
-        if self.last is not None:
-            self.travelled += math.hypot(p.x - self.last[0], p.y - self.last[1])
-        self.last = (p.x, p.y)
-
-    def tick(self):
-        now = self.get_clock().now().nanoseconds / 1e9
-        if self.start is None:
-            self.start = now
-        elapsed = now - self.start
-
-        cmd = Twist()
-        if elapsed < self.duration:
-            cmd.linear.x = self.speed
-        else:
-            self.publisher.publish(cmd)          # explicit zero, then report
-            expected = self.speed * self.duration
-            self.get_logger().info(
-                f"commanded {expected:.3f} m, odometry reports "
-                f"{self.travelled:.3f} m, ratio {self.travelled / expected:.4f}")
-            raise SystemExit
-        self.publisher.publish(cmd)
-
-
-def main():
-    rclpy.init()
-    node = OdomRuler()
-    try:
-        rclpy.spin(node)
-    except (KeyboardInterrupt, SystemExit):
-        pass
-    finally:
-        node.destroy_node()
-        rclpy.shutdown()
-
-
-if __name__ == "__main__":
-    main()
+'drive_distance = robot_workshop.drive_distance:main',
 ```
 
-Run it once with the correct radius, then edit `wheel_radius` in
-`arc_bot_controllers.yaml` to 0.055, rebuild, and run it again.
+The left side names the command; the right side locates the module and function. Keep the Lab 1 entries. In a fresh terminal, source the ROS and course underlays, then build and run your package:
 
-| `wheel_radius` in config | Commanded distance (m) | Reported distance (m) | Ratio | Predicted ratio |
-|---------------------------|------------------------|------------------------|-------|-----------------|
-| 0.050 | 2.0 | | | 1.000 |
-| 0.055 | 2.0 | | | 1.100 |
-| 0.045 | 2.0 | | | 0.900 |
-
-Restore the correct value before you leave. Then note what this means for the
-rest of the course: every downstream consumer inherits this error. The costmap
-places obstacles wrongly, AMCL fights the odometry it is supposed to be
-correcting, and Nav2 overshoots. None of them will tell you why.
-
-Finally, inspect the control layer itself:
-
-```
-ros2 control list_controllers
-ros2 control list_hardware_interfaces
+```bash
+cd ~/student_ws
+colcon build --symlink-install --packages-select robot_workshop
+source install/local_setup.bash
+ros2 run robot_workshop drive_distance --ros-args -p use_sim_time:=true -p distance:=0.4
 ```
 
-The first shows which controllers are loaded and active. The second shows the
-named command and state interfaces the hardware exposes. Compare the interface
-names against the `ros2_control` block in the Xacro; they come from there
-directly.
+Now improve the rule: multiply remaining distance by a gain, cap the result at the permitted speed, and stop within a small tolerance. This slows the approach. Compare completion time and stopping error. The driver currently decides completion from its target distance, so coordinate your tolerance with its completion condition; otherwise it can keep waiting after your rule stops the robot. This is a useful example of why two parts of a program need the same definition of “finished.”
 
-### Exercise 2.5: build something in C++ (15 minutes)
+![Wheel speeds determine body velocity. Feedback compares requested and measured movement.](../../figures/nine/lab02_plot.png)
 
-You will not write C++ in this course, but you will read it, and reading it is
-much easier if you have compiled it at least once.
+## Read a sensor stream and preserve evidence
 
-`arc_lab2_cpp` contains a small `rclcpp` node that subscribes to `/joint_states`
-and warns when a wheel exceeds a configured speed. Make two changes:
-
-1. Change the declared parameter default `max_wheel_speed` from 20.0 to 16.3,
-   the value the kinematics demanded above.
-2. Change the subscribed topic from `/joint_states` to `/dynamic_joint_states`
-   and then change it back, so that you see the build and run cycle twice.
-
-```
-colcon build --packages-select arc_lab2_cpp
-source install/setup.bash
-ros2 run arc_lab2_cpp wheel_watchdog
-ros2 param get /wheel_watchdog max_wheel_speed
+```bash
+ros2 topic info /scan --verbose
+ros2 interface show sensor_msgs/msg/LaserScan
+ros2 topic echo /scan --once --qos-reliability best_effort
+ros2 topic hz /scan
 ```
 
-Read the file while it builds. Notice that the structure is the same as Code 1.1:
-a class deriving from `Node`, a subscription with a callback, a declared
-parameter. The concepts transfer completely; only the syntax and the build step
-differ. That is the point of the exercise, and it is why a Nav2 controller plugin
-in C++ will be readable to you in Lab 6.
+Beam $i$ points at `angle_min + i * angle_increment`. The header gives time and frame. **QoS**, quality of service, describes delivery settings. Sensor publishers often offer best effort, prioritising current data over retrying old samples. A subscriber requiring reliable delivery cannot match a best-effort publisher. Our reference subscriptions use sensor-data QoS.
 
-### Exit task (10 minutes)
+`topic hz` measures the arrival rate seen by that observer. It does not certify the ranges. Face a nearby wall and then open space. If every range is stuck at the minimum, investigate sensor rendering and the VM graphics configuration before using the scan for navigation.
 
-Commit and push, then submit:
+Record a short route for mapping:
 
-1. Your modified URDF with the camera and optical frames, and the `tf2_echo`
-   output for `base_link` to `camera_optical_link`.
-2. The fault you found in Exercise 2.3, the symptom, and the command that
-   revealed it.
-3. Your completed wheel radius table with predicted and measured ratios.
-4. The output of `ros2 control list_hardware_interfaces`.
-
-Run the self check first:
-
-```
-cd ~/arc_ws/src/arc-course
-pytest starters/lab02/tests -v
+```bash
+ros2 bag record -o ~/arc_ws/bags/lab02_route /scan /odom /tf /tf_static
 ```
 
----
+Leave the recorder running. In another terminal start the standard keyboard driver:
 
-## Troubleshooting
-
-**The robot appears in RViz as a jumble of shapes at the origin.**
-
-No transforms are being published. Check that `robot_state_publisher` is running
-and that `/joint_states` has a publisher. Without joint states, non-fixed joints
-have no transform.
-
-**Xacro fails to expand.**
-
-```
-cd ~/arc_ws/src/arc-course
-xacro arc_description/urdf/arc_bot.urdf.xacro > /tmp/check.urdf
-check_urdf /tmp/check.urdf
+```bash
+ros2 run teleop_twist_keyboard teleop_twist_keyboard --ros-args -p use_sim_time:=true
 ```
 
-Expanding by hand gives a line number. `check_urdf` then verifies the tree is
-connected and prints the link hierarchy, which is the fastest way to spot an
-orphaned link.
+Keep that terminal focused. Its displayed key layout explains forward motion and turns; `k` requests a stop. Drive a clear route, then stop the driver and recorder with Ctrl+C. The optional `arc-drive` helper wanders automatically using gap following; it is not a keyboard driver and does not guarantee complete coverage. Choose a new name for another recording.
 
-**"Lookup would require extrapolation into the past."**
+| File or artifact | Your responsibility |
+|---|---|
+| Student `motion_rule.py`, `drive_distance.py`, `setup.py` | Write the rule, understand callbacks, register the executable |
+| `arc_description/urdf/arc_bot.urdf.xacro` | Inspect the supplied geometry and frames |
+| `arc_gazebo/config/ros_gz_bridge.yaml` | Inspect the supplied sensor bridge |
+| `~/arc_ws/bags/lab02_route` | Generated evidence; do not edit its database |
+| Workspace `build`, `install`, `log` | Generated files; edit source instead |
 
-The transform existed but not at the requested time. Almost always a timing
-problem rather than a geometry one, and Lab 3 covers it properly. For today,
-confirm nothing is publishing stale timestamps.
+Keep requested distance, final displacement and the effect of your change. You are ready for Lab 3 when the robot moves, odometry changes, scans are sensible and you can name their frames.
 
-**The robot drives but odometry stays at zero.**
+## Documentation
 
-```
-ros2 control list_controllers
-ros2 topic hz /odom
-```
-
-If `diff_drive_controller` is `inactive`, it is consuming nothing and publishing
-nothing. This is the Lab 1 lifecycle lesson arriving in a new costume.
-
-**The robot turns more slowly than commanded.**
-
-The wheel speeds required exceed the command interface limits and are being
-saturated. Compute the demand with `wheel_speed_limits()` and compare it against
-the `min` and `max` in the `ros2_control` block.
-
----
-
-## Connection to Lab 3
-
-You now have a robot description that is geometrically correct, a control layer
-that converts velocity commands into wheel motion, and a transform tree that
-tells every node where every part of the robot is.
-
-What you do not yet have is any real data. The joint state sliders you used today
-are a fiction, the LiDAR link publishes nothing, and there is no physics.
-
-Next week the robot goes into Gazebo. The wheels will slip, the LiDAR will
-produce noisy readings at 10 Hz, timestamps will start to matter in a way they
-have not so far, and you will meet the difference between wall clock time and
-simulation time. You will also record everything to a bag file, which becomes the
-input to the mapping exercise in Lab 4, so the quality of the recording you make
-next week determines how straightforward that lab is.
-
----
-
-## References
-
-**Textbooks**
-
-Lynch, K. M. and Park, F. C. (2017). *Modern Robotics: Mechanics, Planning, and
-Control*. Cambridge University Press. Chapter 13 covers wheeled mobile robots and
-derives the differential drive model properly, including the nonholonomic
-constraint that this lab treats informally.
-
-Siegwart, R., Nourbakhsh, I. R. and Scaramuzza, D. (2011). *Introduction to
-Autonomous Mobile Robots*, 2nd edition. MIT Press. Chapter 3 on locomotion and
-kinematics, and chapter 5 on odometry error, which is the theoretical version of
-Exercise 2.4.
-
-**Official documentation**
-
-`ros2_control` documentation: https://control.ros.org
-The architecture overview is worth reading in full. The distinction between
-hardware components and controllers is the whole idea and is explained there
-better than in most tutorials.
-
-`tf2` tutorials: https://docs.ros.org/en/jazzy/Tutorials/Intermediate/Tf2
-Work through the broadcaster and listener tutorials if today felt fast.
-
-REP 103, Standard Units of Measure and Coordinate Conventions, and REP 105,
-Coordinate Frames for Mobile Platforms: https://ros.org/reps/rep-0105.html
-Short, authoritative, and the reason `map`, `odom` and `base_link` mean the same
-thing in everyone's code.
-
-URDF and Xacro documentation: https://docs.ros.org/en/jazzy/Tutorials/Intermediate/URDF
-
-**Repositories**
-
-`ros-controls/ros2_control_demos` on GitHub. Includes a minimal hardware
-interface implementation in C++, which is the clearest example of what sits below
-the boundary discussed in the industry section.
-
-**Video**
-
-`ros2_control` architecture talks from ROSCon, on the Open Robotics YouTube
-channel. The diagrams alone are worth the time, particularly the one showing the
-resource manager mediating between controllers and hardware components.
-
----
-
-## Further reading
-
-`docs/references.md` has a fuller list under **Lab 2. Robot description and
-differential drive kinematics**, with papers, industry write-ups and the
-documentation worth keeping open. Every entry says what you get from it and
-which part of the lab it connects to.
-
-If you read one thing, read *Understanding URDF: A Dataset and Analysis* (Tola
-and Corke, 2023). It analyses 322 real URDF files and reports which conventions
-and which mistakes actually occur, which is useful before you write your own.
+- [Jazzy robot_state_publisher](https://docs.ros.org/en/jazzy/p/robot_state_publisher/): URDF, joint states and transforms.
+- [ROS 2 topic tutorial](https://docs.ros.org/en/jazzy/Tutorials/Beginner-CLI-Tools/Understanding-ROS2-Topics/Understanding-ROS2-Topics.html): general discovery and inspection commands.
+- [Jazzy differential drive controller](https://control.ros.org/jazzy/doc/ros2_controllers/diff_drive_controller/doc/userdoc.html): velocity inputs, odometry and timeouts.

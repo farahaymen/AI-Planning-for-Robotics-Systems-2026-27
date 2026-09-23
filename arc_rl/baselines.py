@@ -22,7 +22,7 @@ def make_gap_follow_policy(goal_weight: float = 1.6, clearance_weight: float = 1
     repulsion is symmetric and cancels, so the robot drives into the object at
     full speed. Scoring candidate headings directly avoids that failure without
     adding state, which makes this a fair classical floor for the Lab 9 and
-    Lab 10 comparisons.
+    Lab 9 comparisons.
     """
     n = OBS.n_beams
     front = np.abs(_ANGLES) < (math.pi / 2)

@@ -21,7 +21,10 @@ import math
 
 import numpy as np
 
-from motion import ROBOT
+try:
+    from .motion import ROBOT
+except ImportError:  # Standalone exercise.
+    from motion import ROBOT
 from sensing import LIDAR, LidarSpec, beam_angles, in_corridor
 
 

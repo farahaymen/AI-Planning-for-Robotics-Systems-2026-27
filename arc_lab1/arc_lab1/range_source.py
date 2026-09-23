@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """Publishes a fake range reading at 10 Hz, the rate of the real LiDAR.
 
-Exercise 1.2 asks you to change the publisher QoS to best effort and observe
-that the default subscriber then receives nothing, with no error anywhere.
-
-Exercise 1.3 asks you to change the rate at runtime with `ros2 param set`.
+Lab 1 traces this publisher, changes amplitude, and diagnoses a topic remapping
+mismatch. Runtime rate changes are an optional extension. Sensor QoS is
+introduced with the real scan stream in Lab 3.
 """
 
 import math

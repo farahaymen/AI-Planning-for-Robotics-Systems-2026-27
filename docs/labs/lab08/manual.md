@@ -1,495 +1,95 @@
----
-title: "Lab 8: Building a Reinforcement Learning Environment"
-subtitle: "Autonomous Robotics with ROS 2: Mapping, Navigation and Reinforcement Learning"
-author: "British University in Egypt"
-date: "Duration 2 hours | ARC VM 2026.1"
----
+# Lab 8: Learn the policy directly, then train continuous control
 
-# Lab 8: Building a Reinforcement Learning Environment
+DQN estimates a value for each discrete action. A **policy-gradient** method instead adjusts the parameters of the action-selection rule itself. We first make that idea visible with REINFORCE on the grid robot, then use PPO for the continuous velocity interface of our navigation robot.
 
-**Course** Autonomous Robotics with ROS 2: Mapping, Navigation and Reinforcement Learning
-**Duration** 2 hours
-**Environment** ARC VM 2026.1. The training environment is a Gymnasium `Env` with NumPy dynamics. It has no physics engine and no renderer, so it runs in every graphics tier.
-**Python packages** `gymnasium`, `numpy`, `stable_baselines3`, `rclpy`
-**Course modules** `arc_rl`, in the repository root. It is a plain Python package, not a ROS package: it carries a `COLCON_IGNORE` and no `package.xml`, so `colcon` skips it and there is nothing for `ros2 run` to find. Import it from the repository root, or with `PYTHONPATH` set to it.
+**Your result:** implement discounted returns, run a direct policy update, train a PPO checkpoint and inspect its moving robot replay. You should be able to explain what the actor, critic, advantage and clipping term contribute before changing a hyperparameter.
 
-**Prerequisites**
+## A policy can represent probabilities
 
-Labs 1 to 7. You should be comfortable with the MDP formulation from your
-Reinforcement Learning module. Read `arc_rl/nav_core.py` before the session.
+On the grid, a policy can assign probabilities to the four actions. At one cell it might choose east with probability 0.6, north with 0.2, west with 0.1 and south with 0.1. Training changes these probabilities based on experience. The sampled action still determines one actual move.
 
----
+The implementation stores unconstrained numbers called **logits**. A categorical distribution converts them into probabilities that are nonnegative and sum to one. Logits themselves are not probabilities. Sampling from the distribution allows exploration without a separate epsilon-greedy switch.
 
-## Before the session
+## REINFORCE: increase the likelihood of useful actions
 
-### Why this lab matters
+After collecting an episode, calculate the discounted future return from each decision. For rewards `[1, 2, 3]` and $\gamma=0.9$, the last return is 3, the previous return is $2+0.9\times3=4.7$, and the first is $1+0.9\times4.7=5.23$.
 
-Everything you have built so far was specified. You told the planner what a good
-path was, the controller what a good trajectory was, and the behaviour tree what
-to do when things failed.
+**You implement** `discounted_returns` in `starters/lab08/returns_skeleton.py`. Work backward, repeatedly applying `value = reward + gamma * value`, then restore chronological order. This is simpler and more efficient than recomputing every suffix sum independently.
 
-Today the specification moves. Instead of describing behaviour you describe what
-counts as good, and an optimisation process searches for a policy that produces
-it. That sounds like less work. It is not; it is the same work relocated into the
-environment definition, and the environment is where reinforcement learning
-projects usually go wrong.
+The REINFORCE update increases the log probability of sampled actions in proportion to their return. In code, a minimised loss uses a minus sign:
 
-No training happens today. Today you build the thing that training will happen
-in, and you check it carefully, because a subtle defect in an environment does
-not produce an error. It produces a policy that learns something other than what
-you intended, and you find out three hours into a training run.
+$$L=-\sum_t\gamma^t\log\pi_\theta(a_t\mid s_t)G_t.$$
 
-### The architecture, and where Gymnasium sits
+The symbol $\theta$ denotes learned parameters, not the robot heading here. $\pi_\theta(a\mid s)$ is the policy's probability of action $a$ at state $s$. The log probability provides a useful derivative. The factor $\gamma^t$ corresponds to the discounted start-state objective used by this example. Return is treated as observed data during the gradient calculation.
 
-Two pieces of software are easy to confuse.
-
-**Gazebo is the simulator.** It computes physics and produces sensor data.
-
-**Gymnasium is the interface.** It is a convention for how a learning algorithm
-talks to any environment: `reset` returns an observation, `step` takes an action
-and returns an observation, a reward, a terminated flag, a truncated flag and an
-info dictionary. That is the entire specification, and its value is that every
-RL library speaks it.
-
-```
-   PPO or SAC  <-->  Gymnasium interface  <-->  the environment
-                     reset / step
+```bash
+ARC_RETURN=starters.lab08.returns_skeleton python3 -m teaching.policy_gradient --episodes 1000 --out results/lab08_student
+python3 -m teaching.policy_gradient --episodes 3000 --seed 0 --out results/lab08_reinforce
 ```
 
-What sits behind the interface is your choice, and that choice is the most
-consequential decision in this part of the course.
+The reference experiment writes a greedy policy and training returns. Its grid task ends after at most 150 decisions, so that finite horizon is part of this demonstration's objective. This differs from Lab 7's external collection cutoff. Do not assume every algorithm's episode limit has the same meaning.
 
-### Two environments, one contract
+## Why add a critic?
 
-Reinforcement learning in Gazebo does not work inside this virtual machine, and
-it is worth being precise about why rather than treating it as folklore.
+An action can receive a high return simply because it was taken in an easy state. To compare actions more meaningfully, estimate how much better the observed return was than expected at that state.
 
-Gazebo runs below real time in a VM. A Gazebo backed environment collects roughly
-tens of transitions per second. PPO needs hundreds of thousands. At 50
-transitions per second, 200,000 steps is over an hour, and that is before
-anything goes wrong.
+A **critic** estimates state value $V(s)$. An **actor** supplies the policy. Their difference can form an **advantage** estimate, for example $A_t=G_t-V(s_t)$. If return is 8 and the critic expected 6, the estimated advantage is +2. Positive advantage encourages the sampled action; negative advantage discourages it relative to alternatives.
 
-The measured alternative: the surrogate environment in `arc_rl/nav_core.py` runs
-at about **3,800 steps per second on one CPU core**, and a full PPO training run
-of 200,000 steps completes in **under two minutes** on a single thread. That is
-the difference between a policy you can train in a laboratory session and one you
-cannot.
+Subtracting an action-independent baseline can reduce policy-gradient variance without changing the expected gradient under the usual conditions. A learned critic can still be inaccurate. Actor-critic methods therefore train both a policy and a value function. They are not “two agents competing.”
 
-So the course uses two environments that share one frozen interface:
+**Generalised advantage estimation**, GAE, combines short and longer temporal-difference estimates using a parameter $\lambda$. Shorter estimates rely more on the critic and can have bias; longer estimates can have more variance. PPO uses this machinery in our implementation. You do not need to derive GAE to run the experiment, but you should identify its role and avoid calling the critic's estimate ground truth.
 
-![Two environments, one frozen contract. Throughput figures are measured on the course VM.](docs/figures/diagram_two_environments.png){width=100%}
+![A policy chooses commands. The critic estimates expected return, helping the update judge the sampled action.](../../figures/nine/lab08_flow.png)
 
-Both import the same `build_observation`. A policy trained in the surrogate loads
-and runs against the ROS stack with no change to the network shape or the meaning
-of any observation element.
+## PPO limits an update's incentive to move too far
 
-The two environments differ in physics, and that difference is not a defect to be
-minimised. It is the simulation gap, and Lab 10 asks you to measure it. Having
-experienced a policy degrade between two simulators is a much better preparation
-for the sim-to-real problem than reading about it.
+**Proximal Policy Optimisation**, PPO, collects a rollout with a policy, calculates advantages and then updates using that batch. It compares the probability of the sampled action under the new and old policies:
 
-### The MDP, made concrete
+$$r_t(\theta)=\frac{\pi_\theta(a_t\mid o_t)}{\pi_{old}(a_t\mid o_t)}.$$
 
-**Observation, 29 numbers.** Twenty four LiDAR beams, then goal distance, the
-sine and cosine of the goal angle, and the current linear and angular velocity.
-All scaled to roughly the interval from minus one to one.
+For continuous actions this is a ratio of probability densities. If the sampled action was twice as likely under the new policy, the ratio is 2. PPO's clipped objective compares $r_tA_t$ with a version whose ratio is clipped near 1, typically between 0.8 and 1.2. This reduces the incentive for some excessively large changes. It is not a hard safety constraint and does not guarantee monotonic performance improvement.
 
-Three decisions in that are worth defending.
+Unlike DQN's large replay buffer, PPO normally collects fresh on-policy rollouts for successive updates. Reusing arbitrary old DQN replay samples inside the standard PPO objective would violate its assumptions about the behaviour policy.
 
-*Twenty four beams, not 360.* The policy does not need angular resolution; it
-needs to know where the free space is. Twenty four beams keeps the network small
-enough to train on CPU.
+## Train the same navigation interface with continuous actions
 
-*Downsampled by taking the minimum of each sector, not the mean.* A thin table
-leg that appears in one raw beam must survive downsampling. Averaging erases it,
-and the policy learns to drive through furniture.
+PPO here receives the same 29-number observation as DQN but outputs a two-component normalised action. Positive forward commands scale up to 0.50 m/s, reverse down to -0.125 m/s, and turning to ±1.80 rad/s. A stochastic action distribution provides exploration during training. Evaluation uses the deterministic prediction.
 
-*Sine and cosine of the goal angle rather than the angle.* A raw angle jumps from
-plus pi to minus pi when the goal passes behind the robot. The network sees a
-huge input change for an infinitesimal physical change, and the resulting policy
-behaves strangely in exactly that configuration.
-
-**Action, 2 numbers.** Normalised linear and angular velocity, scaled by
-`scale_action` to the robot's real limits. Keeping the network's output range
-fixed and doing the scaling outside means changing the robot's speed limit does
-not invalidate a trained policy.
-
-**Termination and truncation are different things.** Terminated means the episode
-ended for a reason inside the MDP: the goal was reached, or the robot collided.
-Truncated means the episode was cut off from outside: the step limit expired.
-
-The distinction is not bookkeeping. Value estimation bootstraps through a
-truncation and does not bootstrap through a termination, because a terminated
-state genuinely has no future and a truncated one does. Conflating them
-systematically biases the value function, and it is one of the most common
-silent bugs in custom environments.
-
-### Reward design
-
-The reward function is where your intentions enter, and it is where they get
-misread.
-
-Two are supplied in `nav_core.py`.
-
-`reward_dense_progress` rewards reducing the distance to the goal on every step,
-with a small time penalty, a proximity penalty and terminal bonuses. Dense
-rewards train quickly because there is a gradient everywhere.
-
-`reward_sparse_safe` gives almost nothing until the goal, with a heavier safety
-weighting. Sparse rewards are harder to optimise and specify the task more
-honestly.
-
-Next week you will train both and compare them, and one of them fails in an
-instructive way. Do not read ahead; predict which and why, and write the
-prediction in your exit task.
-
----
-
-> ### Engineering Practice: an environment is software, and it needs tests
->
-> A reinforcement learning environment is the least tested code in most projects
-> and the code where a bug is hardest to notice, because the symptom is a policy
-> that learns the wrong thing rather than a stack trace.
->
-> The failure modes are specific and recurring. An observation that leaks
-> information the robot could not have, so the policy performs impossibly well in
-> training and fails on the robot. A reward computed from state after the step
-> but compared against a distance from before it, producing a free reward for
-> doing nothing. Termination and truncation conflated. A reset that does not
-> fully reset, so episode 400 begins in a state episode 399 left behind.
->
-> The defences are ordinary software engineering. `check_env` from
-> Stable-Baselines3 catches interface violations. A random policy rollout catches
-> crashes and shape errors. A determinism test, running the same seed twice and
-> comparing, catches hidden state. A rollout with a hand written policy that
-> should obviously succeed catches reward sign errors.
->
-> The determinism test in particular is worth adopting as a habit. It takes four
-> lines, it catches an entire class of bug, and without it "my training run is
-> not reproducible" is a mystery rather than a failing test.
-
----
-
-### Pre-lab quiz
-
-Five questions covering the difference between the simulator and the interface,
-why training does not happen in Gazebo, why the goal angle is encoded as a sine
-and cosine pair, the difference between terminated and truncated, and what the
-minimum-per-sector downsampling protects against.
-
----
-
-## In the session
-
-### Stage 0: health check (5 minutes)
-
-```
-course-check
-python3 -c "import gymnasium, stable_baselines3; print('ok')"
+```bash
+python3 -m teaching.train_policy --reward dense_progress --steps 200000 --seed 0 --name lab08_dense
 ```
 
-### Stage 1: demonstration (10 minutes)
+`--steps` is a requested environment-interaction budget. The vectorised implementation collects full batches, so its actual step count can exceed that request; metadata records the actual value. The command uses four small environments and CPU inference. Runtime depends on the teaching machine. Use a smaller budget to check the program, then a measured budget for an actual learning comparison.
 
-Your demonstrator will run a random policy in the surrogate and then a trained
-policy, both rendered as trajectory plots, and will show the throughput figure
-that makes the two-environment design necessary.
+The reward combines signed progress, a small time cost, proximity and turning terms, plus goal/collision outcomes. These terms encourage behaviour but do not mathematically guarantee safety or optimal routes. Read `reward_dense_progress` in `arc_rl/nav_core.py`; calculate the reward for one concrete step before changing coefficients.
 
-### Exercise 8.1: complete the environment (35 minutes)
-
-`starters/lab08/nav_core_skeleton.py` is the file you edit. It is
-`arc_rl/nav_core.py` with the geometry, the raycasting and the observation
-assembly left complete and twelve TODOs opened up across `reset`, the pose
-integration in `step`, the termination logic and the info dictionary.
-
-Work against the tests. There are 14, and all 14 fail on the untouched skeleton.
-Eleven of the twelve TODOs are covered by at least one test. The exception is
-TODO 5, the domain randomisation branch in `reset`, which no test constructs;
-Lab 10 is where that one gets exercised, so write it carefully rather than
-waiting for a red test to tell you it is wrong:
-
-```
-cd ~/arc_ws/src/arc-course
-ARC_NAV_CORE=nav_core_skeleton python3 -m pytest starters/lab08 -q
+```bash
+python3 -m teaching.rollout --policy ppo --model models/lab08_dense.zip --seeds 500 501 502 --out results/lab08_validation
 ```
 
-Without the variable the same tests run against the reference implementation in
-`arc_rl/nav_core.py`, which is a quick way to confirm the suite itself is
-healthy before you start:
+Open `replay_500.html`, the trajectory plots and `summary.json`. A training curve measures reward under the learning process. The evaluation table measures what the frozen policy does under specified conditions. Both matter.
 
-```
-python3 -m pytest starters/lab08 -q
-```
+![Clipping reduces the incentive for certain large policy changes; it does not constrain the robot to safe trajectories.](../../figures/nine/lab08_plot.png)
 
-**Code 8.1: The step method you are completing**
+## Make one controlled comparison
 
-```python
-def step(self, action):
-    dt = self.robot.control_period
-    self.v, self.w = scale_action(action, self.robot)
+Train a second reward design using `--reward sparse_safe` and a new model name. Despite its name, this reward still includes time and proximity terms; it is not purely terminal-only reward. Keep architecture, seeds and interaction budget matched. Alternatively enable `--domain-randomisation`, which in this code varies laser-noise standard deviation only. It does not randomise mass, friction or latency.
 
-    # Unicycle integration. The surrogate has no physics engine on purpose:
-    # no wheel slip, no motor dynamics, no controller lag. That is what makes
-    # it fast, and it is also precisely the gap Lab 10 asks you to measure.
-    self.x += self.v * math.cos(self.theta) * dt
-    self.y += self.v * math.sin(self.theta) * dt
-    self.theta = math.atan2(math.sin(self.theta + self.w * dt),
-                            math.cos(self.theta + self.w * dt))
-    self.path_length += abs(self.v) * dt
-    self._advance_dynamic(dt)
-    self.step_index += 1
+Compare several seeds and report successes, collisions and timeouts. A reward change can increase return while reducing success, especially if the numerical reward scales differ. Returns from different reward definitions are not directly comparable performance scores.
 
-    clearance = self._clearance()
-    self.min_clearance = min(self.min_clearance, clearance)
-    collided = clearance <= 0.0
+## How this develops the earlier RL material
 
-    distance, _ = self._goal_relative()
-    reached = distance <= self.obs_spec.goal_tolerance
+The old dynamic-programming and Q-learning material becomes Lab 6. DQN and Double DQN become Lab 7. REINFORCE, actor-critic ideas and PPO form this lab. This sequence keeps the conceptual dependency clear: return and value first, function approximation next, direct policy optimisation afterward.
 
-    terms = RewardTerms(
-        previous_goal_distance=self._prev_goal_distance,
-        goal_distance=distance,
-        # ... remaining fields
-    )
-    reward = self.reward_fn(terms)
-    self._prev_goal_distance = distance
+Particle swarm optimisation is a population-based optimiser, not a prerequisite for RL. It can be an optional hyperparameter-search project. Multi-agent RL adds interactions between learners and possible nonstationarity; it is also a later extension. We do not compress those separate topics into a beginner's first PPO experiment.
 
-    # Terminated: the episode ended inside the MDP.
-    # Truncated: the episode was cut off from outside.
-    # Value estimation bootstraps through truncation and not through
-    # termination, so returning the wrong one biases the value function
-    # silently for the whole training run.
-    terminated = bool(reached or collided)
-    truncated = bool(self.step_index >= self.scenario.max_episode_steps)
+## Files and reading
 
-    return self._observe(), float(reward), terminated, truncated, self._info()
-```
+| You write or change | Supplied implementation | Generated evidence |
+|---|---|---|
+| `starters/lab08/returns_skeleton.py` | `teaching/policy_gradient.py` | Grid policy and returns |
+| One justified reward or training setting | `teaching/train_policy.py`, `arc_rl/nav_core.py` | Model ZIP, metadata, monitor logs and robot replays |
 
-The `_prev_goal_distance` bookkeeping is the one to be careful about. The dense
-reward compares the distance before the step against the distance after it. If
-you update `_prev_goal_distance` before computing the reward, every step scores
-zero progress and the policy learns nothing while training runs happily to
-completion.
-
-### Exercise 8.2: check it four ways (20 minutes)
-
-Passing your own tests is not enough. Run the four checks from the engineering
-practice box.
-
-**Code 8.2: The four checks, in the order that finds bugs fastest**
-
-```python
-import numpy as np
-from gymnasium.utils.env_checker import check_env as gym_check
-from stable_baselines3.common.env_checker import check_env as sb3_check
-
-from arc_rl.nav_core import FastNavEnv, OBS
-from arc_rl.arenas import training_scenario
-
-env = FastNavEnv(scenario_factory=training_scenario)
-
-# 1. Interface conformance. Catches spaces, dtypes and signatures.
-gym_check(env, skip_render_check=True)
-sb3_check(env)
-print("interface: PASS")
-
-# 2. Shape. The contract says 29; assert it rather than trusting it.
-obs, info = env.reset(seed=0)
-assert obs.shape == (OBS.size,), f"expected {OBS.size}, got {obs.shape}"
-assert env.observation_space.contains(obs), "observation outside its own space"
-print("shape: PASS")
-
-# 3. Determinism. Four lines, and it catches every hidden-state bug.
-def rollout(seed):
-    e = FastNavEnv(scenario_factory=training_scenario)
-    e.reset(seed=seed)
-    rng, total = np.random.default_rng(7), 0.0
-    for _ in range(300):
-        _, r, term, trunc, _ = e.step(rng.uniform(-1, 1, 2).astype(np.float32))
-        total += r
-        if term or trunc:
-            break
-    return total
-
-assert rollout(11) == rollout(11), "same seed, different result: hidden state"
-print("determinism: PASS")
-
-# 4. Sanity. A policy that drives straight at the goal must do better than one
-#    that acts at random. If it does not, the reward sign is wrong.
-def straight_at_goal(obs):
-    angle = np.arctan2(obs[OBS.n_beams + 1], obs[OBS.n_beams + 2])
-    return np.array([0.6, np.clip(angle * 1.5, -1, 1)], dtype=np.float32)
-```
-
-The observation space containment check on line 3 is worth keeping permanently.
-An observation outside its declared bounds is accepted silently by most
-algorithms and quietly breaks normalisation.
-
-Record your results:
-
-| Check | Result | If it failed, what was wrong |
-|-------|--------|------------------------------|
-| `gymnasium` check_env | | |
-| `stable_baselines3` check_env | | |
-| Observation shape and containment | | |
-| Determinism under a repeated seed | | |
-| Goal-seeking beats random | | |
-
-### Exercise 8.3: break it deliberately (15 minutes)
-
-Introduce each of these, observe the symptom, then revert. This is a fifteen
-minute investment that will save you an afternoon next week.
-
-| Injected bug | Predict the symptom | Observed symptom |
-|--------------|--------------------|------------------|
-| Update `_prev_goal_distance` before computing the reward | | |
-| Return `terminated=True` on the step limit instead of `truncated` | | |
-| Downsample the scan with `mean` instead of `min` | | |
-| Feed the raw goal angle instead of sine and cosine | | |
-| Omit the reset of `path_length` in `reset` | | |
-
-Notice that none of these raises an exception. Every one produces a working
-environment that trains a policy which is not the policy you wanted. That is the
-point of the exercise, and it is why the checks in 8.2 exist.
-
-**[SCREENSHOT PLACEHOLDER]**
-Trajectory plots from a random policy and from the hand written goal-seeking
-policy on the same arena.
-*Instructor note: plot the arena walls, obstacles, goal and trajectory in one
-figure per policy, side by side at the same scale. The difference should be
-obvious at a glance, since this is the plot students compare their own against.*
-
-### Exercise 8.4: read the ROS evaluation adapter (10 minutes)
-
-You do not build this one; it is supplied. Read it and answer two questions.
-
-```
-less arc_eval/ros_nav2_env.py
-```
-
-`Nav2EvalEnv` is how `arc_eval.runner` benchmarks the Nav2 stack through the
-same code path it uses for a trained policy. Note three things as you read. It
-subscribes to `/scan` with best effort QoS, the same reliability decision Lab 1
-spends time on and the same one your surrogate does not have to make. It imports
-`ROBOT` from `arc_rl.nav_core`, so the robot constants are shared with the
-surrogate rather than duplicated. And its `step` is not a control step at all:
-the first call sends one `NavigateToPose` goal and every later call spins the
-executor and polls for completion while accumulating metrics, which is why the
-policy the runner passes it is a stub that ignores its observation and returns
-`None`.
-
-That last point is the exercise. `FastNavEnv` steps a policy on an observation
-vector at 20 Hz; `Nav2EvalEnv` hands one goal to a behaviour tree and waits. The
-two satisfy the same runner and report the same metrics, and they do not share
-the observation contract.
-
-In your exit task, answer both of these. First: name three ways a Gazebo backed
-environment differs physically from the surrogate, and predict for each whether
-a policy trained in the surrogate would do better or worse because of it.
-Second: `Nav2EvalEnv` cannot be used to run your trained policy against Gazebo,
-because it never gives the policy an observation to act on. Say what a
-`RosNavEnv` would have to do differently, in terms of the `ObsSpec` and
-`build_observation` you have just been working with, to close that gap.
-
-No such environment exists in this repository yet. The `arc_rl/ros_nav_env.py`
-named in the `arc_rl/nav_core.py` docstring is planned work, not a file you can
-open, and Lab 10 says where that leaves Exercise 10.1. Building it against the
-contract in `nav_core.py` is a well-scoped Project 2 topic.
-
-### Exit task (10 minutes)
-
-Commit and push, then submit:
-
-1. Your completed environment with all tests passing.
-2. Your four-check table.
-3. Your bug injection table with predicted and observed symptoms.
-4. Your three physical differences and predictions from Exercise 8.4.
-5. Your prediction about which supplied reward function will perform worse next
-   week, and why. This is marked on the reasoning, not on being right.
-
----
-
-## Troubleshooting
-
-**`check_env` complains about the observation dtype.** The space is `float32` and
-NumPy promotes to `float64` on almost any arithmetic. Cast explicitly on return.
-
-**`check_env` complains the observation is outside the space.** Some element
-exceeds its declared bounds, usually a velocity when the action was not clipped
-or a beam when the range clip was skipped.
-
-**Rewards are all zero.** The `_prev_goal_distance` ordering bug from Exercise
-8.1.
-
-**Episodes never end.** Termination is being computed from a stale distance, or
-the goal tolerance is smaller than the distance the robot moves in one step.
-At 0.5 m/s and a 0.05 s period that is 2.5 cm, so a tolerance below that can be
-stepped over entirely.
-
-**The same seed gives different results.** State that survives `reset`. The usual
-culprits are accumulators not being cleared and the dynamic obstacles not being
-respawned.
-
-**Training in the surrogate is slower than 1,000 steps per second.** Check that
-you have not added a print, a plot, or a `time.sleep` to the step function. This
-sounds obvious and it is the answer about half the time.
-
----
-
-## Connection to Lab 9
-
-You have an environment that is fast, deterministic, checked and correct, and you
-have not learned anything with it yet.
-
-Next week you train two policies with the two reward functions and benchmark both
-against the classical controller through the same evaluation harness you used in
-Lab 6. The classical floor on held-out arenas is 40 percent success, so there is
-a concrete number to beat.
-
-One of the two reward functions produces a policy that fails completely, in a way
-that is entirely explained by arithmetic you can do on the reward constants before
-training starts. Bring your prediction from the exit task.
-
----
-
-## References
-
-**Textbooks**
-
-Sutton, R. S. and Barto, A. G. (2018). *Reinforcement Learning: An Introduction*,
-2nd edition. MIT Press, freely available online. Chapter 3 for the MDP
-formulation and chapter 17.4 on the difference between episodic termination and
-time limits, which is the terminated versus truncated distinction.
-
-**Official documentation**
-
-Gymnasium: https://gymnasium.farama.org
-The custom environment tutorial and the API reference. The migration notes from
-Gym are worth reading, because a great deal of material you will find online uses
-the old four-value step signature.
-
-Stable-Baselines3 custom environments:
-https://stable-baselines3.readthedocs.io/en/master/guide/custom_env.html
-The `check_env` documentation lists exactly what it verifies.
-
-**Papers**
-
-Amodei, D. et al. (2016). Concrete Problems in AI Safety. arXiv:1606.06565.
-Sections 2 and 3 on reward hacking and side effects are the clearest treatment of
-why specifying what you want is harder than it looks, and they are directly
-relevant to the reward you write here.
-
-**Repositories**
-
-`DLR-RM/rl-baselines3-zoo` on GitHub. Working hyperparameters for a large number
-of environments, and a useful reference for how a training script is normally
-structured.
-
-## Further reading
-
-`docs/references.md` has a fuller list under **Lab 8. Building a reinforcement
-learning environment**. Start with the Gymnasium paper by Towers et al.: it
-explains why `reset`, `step`, `observation_space` and `action_space` are shaped
-the way they are, which is exactly the contract you spent this lab
-implementing. If you want to see the observation contract argument made at full
-scale, the Arena 4.0 paper in the same section describes a ROS 2 platform where
-the training environment and the real navigation stack share one interface.
+- Sutton and Barto, second edition, Chapter 13: policy-gradient methods. [Book](https://incompleteideas.net/book/the-book-2nd.html).
+- Schulman et al., *Proximal Policy Optimization Algorithms*, 2017. [Paper](https://arxiv.org/abs/1707.06347).
+- [Stable-Baselines3 PPO documentation](https://stable-baselines3.readthedocs.io/en/master/modules/ppo.html): implementation parameters and supported action spaces.

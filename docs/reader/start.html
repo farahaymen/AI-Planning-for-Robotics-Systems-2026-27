@@ -1,0 +1,399 @@
+<h1 id="readme-start-here-your-robotics-laboratory-workspace">Start here: Your
+robotics laboratory workspace</h1>
+<p>Welcome. In these labs you will teach a small simulated robot to
+sense its surroundings, build a map and move towards a goal. You will
+first learn how its programs exchange information. Later, you will
+compare programmed navigation with a controller that learns from
+experience. You do not need previous ROS experience; we introduce each
+tool when you need it.</p>
+<p>This page is your guide to starting a session and getting back to a
+working state if something breaks. Keep it open beside the lab. The
+commands below belong <strong>inside the Ubuntu course virtual
+machine</strong>, not in Windows PowerShell or your host computer’s
+terminal.</p>
+<h3 id="start-extra-new-to-ros-start-with-the-explanation">New to ROS? Start with
+the explanation</h3>
+<p>The <a href="#guide-why-ros">ROS foundations chapter</a> explains
+what the tools are for before asking you to configure them. Read its
+first three sections if words such as terminal, node or package are new.
+Then return here to prepare the course VM. <a href="#guide-project-layout">Create your first practice project</a> when
+you want a complete worked example of the files and build process.</p>
+<p>The course workspace contains supplied robot packages. The student
+workspace contains the package you build through the labs. The optional
+beginner workspace in the foundations chapter is a separate practice
+example. Each command names the workspace it uses, so keep those paths
+distinct.</p>
+<h2 id="readme-find-your-workspace">1. Find your workspace</h2>
+<p>Start the supplied <strong>ARC VM 2026.1</strong> and log into Ubuntu
+with the account your instructor provided. Open Terminal from the
+application menu, or press Ctrl+Alt+T. A terminal accepts commands and
+displays their output.</p>
+<p>You may see a prompt like <code>ros@ros-VirtualBox:~$</code>. Type
+only the command after the prompt. Do not copy the prompt itself. Press
+Enter to run a line. A program that is still running may not give you
+the prompt back; keep that terminal open and use another terminal when
+the lab asks for one.</p>
+<div class="sourceCode" id="readme-cb1"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="readme-cb1-1"><a aria-hidden="true" href="#readme-cb1-1" tabindex="-1"></a><span class="bu">cd</span> ~/arc_ws</span>
+<span id="readme-cb1-2"><a aria-hidden="true" href="#readme-cb1-2" tabindex="-1"></a><span class="bu">pwd</span></span>
+<span id="readme-cb1-3"><a aria-hidden="true" href="#readme-cb1-3" tabindex="-1"></a><span class="fu">ls</span></span></code></pre></div>
+<p><code>cd</code> changes your current directory, <code>pwd</code>
+prints it, and <code>ls</code> lists its contents. The symbol
+<code>~</code> means your home directory. For the account
+<code>ros</code>, the workspace is normally
+<code>/home/ros/arc_ws</code>. We use <code>~</code> so the instructions
+also work with another account name.</p>
+<div aria-label="Scrollable reference table" class="table-scroll" role="region" tabindex="0"><table>
+<colgroup>
+<col style="width: 50%"/>
+<col style="width: 50%"/>
+</colgroup>
+<thead>
+<tr class="header">
+<th>Place</th>
+<th>What you will find there</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>~/arc_ws</code></td>
+<td>The workspace: the main folder used to build and run the course
+software</td>
+</tr>
+<tr class="even">
+<td><code>~/arc_ws/src/arc-course</code></td>
+<td>The course repository: source code, lab text and helper
+programs</td>
+</tr>
+<tr class="odd">
+<td><code>~/arc_ws/build</code>, <code>install</code>,
+<code>log</code></td>
+<td>Files created by the build process; these can be regenerated</td>
+</tr>
+<tr class="even">
+<td><code>~/arc_ws/maps</code>, <code>bags</code>,
+<code>results</code></td>
+<td>Maps, recorded robot data and other saved work</td>
+</tr>
+<tr class="odd">
+<td><code>~/student_ws/src/robot_workshop</code></td>
+<td>Your own package, created in Lab 1 and extended throughout the
+labs</td>
+</tr>
+<tr class="even">
+<td><code>~/student_ws/build</code>, <code>install</code>,
+<code>log</code></td>
+<td>Generated files for your student workspace</td>
+</tr>
+<tr class="odd">
+<td><code>~/arc_ws/src/arc-course/results</code>, <code>models</code>,
+<code>runs</code></td>
+<td>Results and learning artifacts written by the later Python labs</td>
+</tr>
+</tbody>
+</table></div>
+<p>If <code>cd ~/arc_ws</code> reports “No such file or directory,” use
+the setup procedure in section 3. Do not create a second workspace with
+a guessed name.</p>
+<h2 id="readme-prepare-every-new-terminal">2. Prepare every new terminal</h2>
+<p>Once the workspace exists, run these three lines <strong>in each new
+terminal</strong>:</p>
+<div class="sourceCode" id="readme-cb2"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="readme-cb2-1"><a aria-hidden="true" href="#readme-cb2-1" tabindex="-1"></a><span class="bu">source</span> /opt/ros/jazzy/setup.bash</span>
+<span id="readme-cb2-2"><a aria-hidden="true" href="#readme-cb2-2" tabindex="-1"></a><span class="bu">source</span> ~/arc_ws/install/setup.bash</span>
+<span id="readme-cb2-3"><a aria-hidden="true" href="#readme-cb2-3" tabindex="-1"></a><span class="bu">cd</span> ~/arc_ws/src/arc-course</span></code></pre></div>
+<p>The first line tells this terminal where the installed ROS 2 tools
+are. The second adds the course packages built in your workspace.
+<code>source</code> loads these settings into the current terminal; it
+does not reinstall software. The last line puts you in the course folder
+so relative filenames and Python modules work as shown in the labs.
+Successful <code>source</code> commands normally print nothing.</p>
+<p>Check that the setup worked:</p>
+<div class="sourceCode" id="readme-cb3"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="readme-cb3-1"><a aria-hidden="true" href="#readme-cb3-1" tabindex="-1"></a><span class="ex">ros2</span> pkg prefix arc_lab1</span></code></pre></div>
+<p>You should see a path ending in <code>install/arc_lab1</code>. If the
+package is not found, repeat the two <code>source</code> commands. If
+<code>install/setup.bash</code> itself is missing, the workspace needs
+to be built using section 3.</p>
+<p>From the build activity in Lab 1 onward, add your own installed
+package after the two source commands above:</p>
+<div class="sourceCode" id="readme-cb4"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="readme-cb4-1"><a aria-hidden="true" href="#readme-cb4-1" tabindex="-1"></a><span class="bu">source</span> ~/student_ws/install/local_setup.bash</span></code></pre></div>
+<p>Use this only after you have created and built that workspace. Run
+course Python helpers from the course repository root as before. Your
+editable student code lives in
+<code>~/student_ws/src/robot_workshop</code>, and its build command runs
+from <code>~/student_ws</code>. Distinguishing source, build and
+execution locations prevents many apparent missing-file errors.</p>
+<p>The <a href="#commands">ROS command guide</a> explains the
+general tools behind these steps. The <code>arc-</code> commands prepare
+the supplied environment; the labs also teach you to create, build and
+inspect packages using ordinary ROS 2 commands.</p>
+<p>Each lab labels its running terminals <strong>A</strong>,
+<strong>B</strong>, <strong>C</strong> and so on. These are ordinary
+terminal windows, not different machines. Prepare each one using the
+same three lines. Keep the course’s communication settings unchanged;
+all terminals for your robot must use the same
+<code>ROS_DOMAIN_ID</code>. The supplied VM uses local discovery so your
+robot’s programs stay within your VM.</p>
+<h2 id="readme-set-up-the-course-or-rebuild-it-after-an-update">3. Set up the
+course, or rebuild it after an update</h2>
+<p>Use this on your first session if the instructor asks you to prepare
+the workspace, after receiving course updates, or when a missing/broken
+package needs rebuilding. It is <strong>not</strong> necessary every
+time you open a terminal.</p>
+<p>First stop active experiments using section 4. If you have edited
+source files, save them in your editor and make a backup before
+updating:</p>
+<div class="sourceCode" id="readme-cb5"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="readme-cb5-1"><a aria-hidden="true" href="#readme-cb5-1" tabindex="-1"></a><span class="fu">cp</span> <span class="at">-a</span> ~/arc_ws/src/arc-course <span class="st">"</span><span class="va">$HOME</span><span class="st">/arc-course-backup-</span><span class="va">$(</span><span class="fu">date</span> +%Y%m%d-%H%M%S<span class="va">)</span><span class="st">"</span></span></code></pre></div>
+<p>Run the backup command only if that source folder exists. It copies
+your course folder to a new dated folder in your home directory; it does
+not change the original. It can take time if your folder includes
+recorded results or models.</p>
+<p>In a terminal, run:</p>
+<div class="sourceCode" id="readme-cb6"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="readme-cb6-1"><a aria-hidden="true" href="#readme-cb6-1" tabindex="-1"></a><span class="bu">source</span> /opt/ros/jazzy/setup.bash</span>
+<span id="readme-cb6-2"><a aria-hidden="true" href="#readme-cb6-2" tabindex="-1"></a><span class="ex">arc-setup</span></span></code></pre></div>
+<p><code>arc-setup</code> retrieves course updates, resolves workspace
+dependencies, builds the packages, installs course helper commands and
+runs checks. It needs network access when retrieving
+updates/dependencies. If it asks for your Ubuntu password to install a
+dependency, type it and press Enter; password characters are not
+displayed. Run <code>arc-setup</code> as your normal account, not as
+<code>sudo arc-setup</code>.</p>
+<p>Wait for it to finish. The build and simulator checks can take
+several minutes on a VM. Read the final result: <strong>“Environment
+ready”</strong> means its required checks passed. If a step says
+<code>FAILED</code>, keep the error output and use section 5. Do not
+interpret “build complete” as proof that the simulator checks
+passed.</p>
+<p>After a successful setup, prepare your current terminal again:</p>
+<div class="sourceCode" id="readme-cb7"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="readme-cb7-1"><a aria-hidden="true" href="#readme-cb7-1" tabindex="-1"></a><span class="bu">source</span> ~/arc_ws/install/setup.bash</span>
+<span id="readme-cb7-2"><a aria-hidden="true" href="#readme-cb7-2" tabindex="-1"></a><span class="bu">cd</span> ~/arc_ws/src/arc-course</span></code></pre></div>
+<p>The setup script runs in its own process, so its temporary settings
+do not automatically update your existing terminals. Re-source other
+terminals too.</p>
+<p>If <code>arc-setup</code> is not found but the repository is present,
+run its source copy:</p>
+<div class="sourceCode" id="readme-cb8"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="readme-cb8-1"><a aria-hidden="true" href="#readme-cb8-1" tabindex="-1"></a><span class="fu">bash</span> ~/arc_ws/src/arc-course/scripts/arc-setup</span></code></pre></div>
+<p>If both the command and the repository are missing, or
+<code>/opt/ros/jazzy</code> does not exist, ask for the supplied course
+VM or its documented restoration procedure. <code>arc-setup</code>
+rebuilds the course workspace; it does not install an entire Ubuntu, ROS
+and Gazebo system onto an empty machine.</p>
+<h2 id="readme-stop-and-clean-an-experiment">4. Stop and clean an
+experiment</h2>
+<p>When a lab program is running, click its terminal and press
+<strong>Ctrl+C</strong> once. Allow it to stop. Do this for the
+simulator, viewers, keyboard driver, recorder and any other programs you
+started. Stop a recording this way so it can finish writing its
+files.</p>
+<p>Then, in a prepared terminal:</p>
+<div class="sourceCode" id="readme-cb9"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="readme-cb9-1"><a aria-hidden="true" href="#readme-cb9-1" tabindex="-1"></a><span class="ex">arc-clean</span></span>
+<span id="readme-cb9-2"><a aria-hidden="true" href="#readme-cb9-2" tabindex="-1"></a><span class="ex">arc-clean</span> <span class="at">--check</span></span></code></pre></div>
+<p><code>arc-clean</code> stops remaining course processes and refreshes
+the ROS discovery cache. It does <strong>not</strong> delete source
+code, maps or recordings. Its <code>--check</code> option only looks for
+leftover course processes. If a program is still listed, find its
+terminal and stop it. A manual <code>ros2 topic pub</code> or a separate
+recorder may need Ctrl+C even after the course cleanup. Your new student
+executables also need to be stopped in their own terminals;
+<code>arc-clean --check</code> checks course process patterns, not every
+program you may write. Confirm the expected nodes disappeared using
+<code>ros2 node list</code> after discovery has updated.</p>
+<p>If the installed cleanup command is missing, use:</p>
+<div class="sourceCode" id="readme-cb10"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="readme-cb10-1"><a aria-hidden="true" href="#readme-cb10-1" tabindex="-1"></a><span class="fu">bash</span> ~/arc_ws/src/arc-course/scripts/arc-clean</span></code></pre></div>
+<p>Use this cleanup before starting a fresh simulation, switching to
+recorded playback, or rerunning a simulator check. Start one simulator
+at a time. Close the keyboard driver before starting an autonomous
+driver so they do not send competing commands to the same robot.</p>
+<h2 id="readme-recover-in-small-steps">5. Recover in small steps</h2>
+<p>Most lab problems do not require reinstalling the VM. Choose the row
+that matches what you actually see:</p>
+<div aria-label="Scrollable reference table" class="table-scroll" role="region" tabindex="0"><table>
+<colgroup>
+<col style="width: 33%"/>
+<col style="width: 33%"/>
+<col style="width: 33%"/>
+</colgroup>
+<thead>
+<tr class="header">
+<th>What you see</th>
+<th>First action</th>
+<th>If it still fails</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>ros2: command not found</code></td>
+<td>Source <code>/opt/ros/jazzy/setup.bash</code></td>
+<td>If that file is missing, the base VM needs restoration/support</td>
+</tr>
+<tr class="even">
+<td><code>Package ... not found</code></td>
+<td>Source <code>~/arc_ws/install/setup.bash</code></td>
+<td>Run <code>arc-setup</code>, then source it again</td>
+</tr>
+<tr class="odd">
+<td>Duplicate robots, old windows, or unexpected publishers</td>
+<td>Ctrl+C in running terminals, then <code>arc-clean</code></td>
+<td>Close remaining manual programs and retry one launch</td>
+</tr>
+<tr class="even">
+<td><code>No module named teaching</code> or <code>arc_rl</code></td>
+<td><code>cd ~/arc_ws/src/arc-course</code></td>
+<td>Check that the updated files are present; use the course Python
+environment</td>
+</tr>
+<tr class="odd">
+<td>A bag/output folder already exists</td>
+<td>Choose a new output name, such as <code>_v2</code></td>
+<td>Keep the earlier result for comparison</td>
+</tr>
+<tr class="even">
+<td>A build fails, or rebuilt packages still appear stale</td>
+<td>Save your work and stop all experiments</td>
+<td>Use the clean rebuild below</td>
+</tr>
+<tr class="odd">
+<td>A Git conflict appears during setup</td>
+<td>Stop the update and keep the message</td>
+<td>Ask your instructor to help reconcile edits; repeated setup cannot
+choose the correct code for you</td>
+</tr>
+<tr class="even">
+<td>Gazebo/RViz exits or the scan looks wrong</td>
+<td>Clean up, then run the environment checks below</td>
+<td>Keep the first error and health report for your instructor</td>
+</tr>
+</tbody>
+</table></div>
+<p>For a clean rebuild, open a <strong>fresh terminal</strong>, stop
+existing experiments, and run:</p>
+<div class="sourceCode" id="readme-cb11"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="readme-cb11-1"><a aria-hidden="true" href="#readme-cb11-1" tabindex="-1"></a><span class="bu">source</span> /opt/ros/jazzy/setup.bash</span>
+<span id="readme-cb11-2"><a aria-hidden="true" href="#readme-cb11-2" tabindex="-1"></a><span class="ex">arc-setup</span> <span class="at">--clean</span></span></code></pre></div>
+<p>This removes and regenerates <code>~/arc_ws/build</code>,
+<code>install</code> and <code>log</code>. It keeps the source folder
+and saved data, and it also updates the repository as normal setup does.
+Save/back up source edits first. After success, source the new
+<code>install/setup.bash</code> in every terminal you will reuse.</p>
+<p>Check the environment independently when needed. Run these commands
+one at a time so you can read the result before continuing:</p>
+<div class="sourceCode" id="readme-cb12"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="readme-cb12-1"><a aria-hidden="true" href="#readme-cb12-1" tabindex="-1"></a><span class="bu">source</span> ~/arc_ws/install/setup.bash</span>
+<span id="readme-cb12-2"><a aria-hidden="true" href="#readme-cb12-2" tabindex="-1"></a><span class="ex">course-check</span></span>
+<span id="readme-cb12-3"><a aria-hidden="true" href="#readme-cb12-3" tabindex="-1"></a><span class="ex">course-smoke-test</span> <span class="at">--headless</span></span></code></pre></div>
+<p>Run the smoke test only with other experiments stopped and after
+resolving required <code>course-check</code> failures.
+<code>course-check</code> checks the installed environment; the smoke
+test launches the robot and checks behaviour. Here
+<code>--headless</code> hides the Gazebo window; the lidar still needs
+working graphics inside the VM.</p>
+<p>If setup fails while running Python exercise tests, keep the named
+failing test. An incomplete student algorithm can fail a test even with
+a healthy ROS installation. A clean rebuild preserves those source
+edits, so it will not magically complete or repair the algorithm.</p>
+<p>For a broken student build, keep <code>~/student_ws/src</code>
+intact. In a fresh terminal, source ROS and the course underlay,
+<code>cd ~/student_ws</code>, then rerun
+<code>colcon build --symlink-install --packages-select robot_workshop</code>.
+Correct the first reported error. <code>arc-setup --clean</code>
+rebuilds the course workspace only; it does not rebuild your student
+package. If a generated student installation must be replaced, close its
+running programs, rename its <code>build</code>, <code>install</code>
+and <code>log</code> directories to dated backup names in the file
+manager, and build again. Preserve <code>src</code>, parameter snapshots
+and result/model files.</p>
+<p>When asking for help, provide the command you ran and its first
+error, together with the health report path printed by
+<code>course-check</code>. Failed simulator launch output is saved at
+<code>~/arc_ws/.arc/last-launch.log</code>; setup’s Python test output
+is at <code>~/arc_ws/.arc/offline-tests.log</code>.</p>
+<p>If the whole VM must be restored from the instructor’s snapshot or
+re-imported, copy both source workspaces, maps, bags and learning
+results <strong>outside the VM first</strong>. Restoring a snapshot can
+remove everything created after it. Return to section 3 once the
+supplied VM is running again.</p>
+<h2 id="readme-begin-the-labs">6. Begin the labs</h2>
+<p>The essential daily routine is: <strong>prepare each terminal → run
+the lab → save your evidence → Ctrl+C and clean up</strong>. Setup and
+clean rebuild are recovery tools, not extra commands to run between
+every activity.</p>
+<div aria-label="Scrollable reference table" class="table-scroll" role="region" tabindex="0"><table>
+<colgroup>
+<col style="width: 33%"/>
+<col style="width: 33%"/>
+<col style="width: 33%"/>
+</colgroup>
+<thead>
+<tr class="header">
+<th>Lab</th>
+<th>Starting from what you know</th>
+<th>What you will build next</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><a href="#lab01">1</a></td>
+<td>Running a program</td>
+<td>Two ROS 2 nodes that exchange and use a number</td>
+</tr>
+<tr class="even">
+<td><a href="#lab02">2</a></td>
+<td>Nodes and messages</td>
+<td>A visible robot model, named frames and a predicted turn</td>
+</tr>
+<tr class="odd">
+<td><a href="#lab03">3</a></td>
+<td>Robot geometry and frames</td>
+<td>A moving Gazebo robot and a useful sensor recording</td>
+</tr>
+<tr class="even">
+<td><a href="#lab04">4</a></td>
+<td>Recorded distances and robot poses</td>
+<td>A map made from free/occupied-cell evidence</td>
+</tr>
+<tr class="odd">
+<td><a href="#lab05">5</a></td>
+<td>A map whose geometry can drift</td>
+<td>A corrected map and an estimate of the robot’s location</td>
+</tr>
+<tr class="even">
+<td><a href="#lab06">6</a></td>
+<td>A localised robot</td>
+<td>One complete goal-directed navigation mission</td>
+</tr>
+<tr class="odd">
+<td><a href="#lab07">7</a></td>
+<td>A working navigation mission</td>
+<td>A diagnosis and recovery when progress stops</td>
+</tr>
+<tr class="even">
+<td><a href="#lab08">8</a></td>
+<td>Observations, commands and outcomes</td>
+<td>A small executable reinforcement-learning environment</td>
+</tr>
+<tr class="odd">
+<td><a href="#lab09">9</a></td>
+<td>A checked learning environment</td>
+<td>A trained policy and a fair baseline comparison</td>
+</tr>
+<tr class="even">
+<td><a href="#lab10">10</a></td>
+<td>Measured classical/learned behaviour</td>
+<td>A hybrid controller and tests of its limitations</td>
+</tr>
+</tbody>
+</table></div>
+<p>Each lab connects a working robot experiment with a component you
+build. Write the input/output requirement first, implement a small
+version, then use known inputs to check it. The reference listings help
+you diagnose differences; you should still be able to create the files,
+explain their interfaces and adapt them without importing a
+course-specific node.</p>
+<p>The reading is more detailed than the code you need to type in two
+hours. Use it before and during the session, and return to the
+mathematical examples when you need them. Prioritise the baseline,
+student build and one well-explained repair. Additional comparisons can
+continue after class. The optional extensions are there when you are
+ready to go further. For your notebook, keep the command, what you
+expected, what happened and the change that explains the difference.
+Start with Lab 1; you do not need to learn every term in this table in
+advance.</p>
+<p>If you want to revisit how sourcing works, the official <a href="https://docs.ros.org/en/jazzy/Tutorials/Beginner-CLI-Tools/Configuring-ROS2-Environment.html">ROS
+2 environment tutorial</a> explains the underlying settings. The course
+recovery commands above are specific to this VM and repository.</p>

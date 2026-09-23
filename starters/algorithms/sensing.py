@@ -19,7 +19,10 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from motion import Pose
+try:
+    from .motion import Pose
+except ImportError:  # Standalone exercise.
+    from motion import Pose
 
 
 @dataclass(frozen=True)

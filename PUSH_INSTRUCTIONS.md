@@ -1,6 +1,6 @@
 # Pushing this repository to GitHub
 
-The repository is already initialised with one commit. You need to create the
+The repository is already initialised with one commit. Create the
 remote and push.
 
 ## 1. Create the repository on GitHub

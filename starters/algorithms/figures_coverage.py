@@ -18,7 +18,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.colors import ListedColormap
 
-from gridmap import empty_room
+try:
+    from .gridmap import empty_room
+except ImportError:  # Standalone exercise.
+    from gridmap import empty_room
 
 C_FREE = "#ffffff"
 C_WALL = "#33373d"

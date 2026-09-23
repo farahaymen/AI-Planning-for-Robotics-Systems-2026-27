@@ -19,8 +19,14 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.colors import ListedColormap
 
-from gridmap import empty_room
-from motion import ROBOT, Pose, step
+try:
+    from .gridmap import empty_room
+except ImportError:  # Standalone exercise.
+    from gridmap import empty_room
+try:
+    from .motion import ROBOT, Pose, step
+except ImportError:  # Standalone exercise.
+    from motion import ROBOT, Pose, step
 from sensing import LIDAR, beam_angles, raycast, scan_to_points
 
 C_WALL = "#33373d"

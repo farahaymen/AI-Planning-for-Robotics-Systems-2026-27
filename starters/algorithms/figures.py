@@ -31,7 +31,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.colors import ListedColormap
 
-from gridmap import GOAL, MAPS, MOVES_8, START
+try:
+    from .gridmap import GOAL, MAPS, MOVES_8, START
+except ImportError:  # Standalone exercise.
+    from gridmap import GOAL, MAPS, MOVES_8, START
 
 # Consistent across all four figures, so a reader can compare panels.
 C_FREE = "#ffffff"

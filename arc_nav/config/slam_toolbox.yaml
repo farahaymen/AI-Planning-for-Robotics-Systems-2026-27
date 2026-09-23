@@ -13,8 +13,8 @@ slam_toolbox:
     transform_timeout: 0.2
     map_update_interval: 2.0
 
-    # Loop closure. Lab 5 depends on this triggering reliably on the reference
-    # bag; if it does not, lower the coarse search distance before anything else.
+    # Loop closure is enabled, but detection depends on the recorded route and
+    # scan geometry. Lab 5 asks students to inspect evidence before tuning.
     do_loop_closing: true
     loop_search_maximum_distance: 3.0
     loop_match_minimum_chain_size: 10

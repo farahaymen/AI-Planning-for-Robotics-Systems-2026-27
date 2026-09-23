@@ -1,0 +1,7 @@
+<?xml version="1.0"?>
+<package format="3"><name>arc_course</name><version>2.0.0</version>
+<description>Course motion and learned-policy experiments.</description>
+<maintainer email="course@example.com">ARC teaching team</maintainer><license>Apache-2.0</license>
+<buildtool_depend>ament_python</buildtool_depend><exec_depend>rclpy</exec_depend>
+<exec_depend>geometry_msgs</exec_depend><exec_depend>nav_msgs</exec_depend><exec_depend>sensor_msgs</exec_depend>
+<exec_depend>python3-numpy</exec_depend><export><build_type>ament_python</build_type></export></package>

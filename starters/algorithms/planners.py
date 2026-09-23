@@ -24,7 +24,10 @@ from typing import Callable, Optional
 
 import numpy as np
 
-from gridmap import MOVES_4, MOVES_8, path_length
+try:
+    from .gridmap import MOVES_4, MOVES_8, path_length
+except ImportError:  # Standalone exercise.
+    from gridmap import MOVES_4, MOVES_8, path_length
 
 Cell = tuple[int, int]
 
