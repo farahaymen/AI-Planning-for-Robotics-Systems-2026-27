@@ -31,7 +31,7 @@ if command -v nm-online >/dev/null 2>&1; then
   nm-online -q -t 60 || echo "Network is not ready yet. Setup will report if the update cannot be downloaded."
 fi
 # A login shell loads /etc/profile.d/arc-course.sh on the course VM.
-bash -lc 'if command -v arc-setup >/dev/null 2>&1; then arc-setup --unattended; else bash "$HOME/arc_ws/src/arc-course/scripts/arc-setup" --unattended; fi' \
+bash -lc 'if [[ -f "$HOME/arc_ws/src/arc-course/scripts/arc-setup" ]]; then bash "$HOME/arc_ws/src/arc-course/scripts/arc-setup" --unattended; else arc-setup --unattended; fi' \
   2>&1 | tee "$log"
 result=${PIPESTATUS[0]}
 echo
