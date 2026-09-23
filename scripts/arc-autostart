@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+# Start arc-setup when this user's Ubuntu desktop session starts.
+# Run once as the normal VM user: arc-autostart enable
+set -euo pipefail
+
+if [[ $EUID -eq 0 ]]; then
+  echo "Run this as your normal VM user, without sudo." >&2
+  exit 1
+fi
+
+config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/autostart"
+bin_dir="$HOME/.local/bin"
+desktop_file="$config_dir/arc-setup.desktop"
+runner="$bin_dir/arc-setup-on-login"
+
+case "${1:-}" in
+  enable)
+    terminal="$(command -v gnome-terminal || true)"
+    if [[ -z "$terminal" ]]; then
+      echo "gnome-terminal is missing. Install it before enabling desktop startup." >&2
+      exit 1
+    fi
+    mkdir -p "$config_dir" "$bin_dir"
+    cat > "$runner" <<'RUNNER'
+#!/usr/bin/env bash
+set -uo pipefail
+mkdir -p "$HOME/arc_ws/.arc"
+log="$HOME/arc_ws/.arc/startup-$(date +%Y%m%d-%H%M%S).log"
+echo "ARC setup is starting. Output will be saved to: $log"
+if command -v nm-online >/dev/null 2>&1; then
+  nm-online -q -t 60 || echo "Network is not ready yet. Setup will report if the update cannot be downloaded."
+fi
+# A login shell loads /etc/profile.d/arc-course.sh on the course VM.
+bash -lc 'if command -v arc-setup >/dev/null 2>&1; then arc-setup --unattended; else bash "$HOME/arc_ws/src/arc-course/scripts/arc-setup" --unattended; fi' \
+  2>&1 | tee "$log"
+result=${PIPESTATUS[0]}
+echo
+if [[ $result -eq 0 ]]; then
+  echo "ARC setup finished successfully."
+else
+  echo "ARC setup failed (exit $result). Read the messages above or: $log"
+fi
+read -r -p "Press Enter to close this window... " _ || true
+exit "$result"
+RUNNER
+    chmod 0755 "$runner"
+    cat > "$desktop_file" <<DESKTOP
+[Desktop Entry]
+Type=Application
+Name=ARC course setup
+Comment=Update, build and verify the robotics course at desktop login
+Exec=$terminal -- $runner
+Terminal=false
+X-GNOME-Autostart-enabled=true
+DESKTOP
+    echo "Enabled: arc-setup will start in a terminal at your next desktop login."
+    echo "Unattended mode never asks for a sudo password."
+    echo "If new Ubuntu packages are required, run arc-setup manually once."
+    echo "Log: ~/arc_ws/.arc/startup-YYYYMMDD-HHMMSS.log"
+    ;;
+  disable)
+    rm -f "$desktop_file" "$runner"
+    echo "Disabled ARC desktop startup. You can still run arc-setup manually."
+    ;;
+  status)
+    if [[ -f "$desktop_file" && -x "$runner" ]]; then
+      echo "Enabled: ARC setup starts at desktop login."
+    else
+      echo "Disabled: ARC setup will not start automatically."
+    fi
+    ;;
+  *)
+    echo "Usage: arc-autostart {enable|disable|status}" >&2
+    exit 2
+    ;;
+esac
