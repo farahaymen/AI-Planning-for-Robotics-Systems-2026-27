@@ -25,4 +25,4 @@ source "$HOME/arc_ws/install/setup.bash"
 set -u
 course-check | tee "$HOME/arc_ws/.arc/nine-labs-environment.log"
 course-smoke-test --headless | tee "$HOME/arc_ws/.arc/nine-labs-motion.log"
-echo 'Base simulation gate passed. Complete the SLAM/Nav2/policy acceptance checks in verification/README.md.'
+echo 'Base simulation gate passed. Run each lab and compare its observed result with docs/ARC_Laboratories.html.'

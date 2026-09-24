@@ -1,2 +1,0 @@
-seed,policy,noise_std_m,observation_delay_steps,success,collisions,min_clearance_m,path_length_m,time_s,checkpoints_reached,recovery_events,interventions,termination_reason,return_dense,collision_free_success,handovers,learned_fraction
-500,gap,0.01,0,False,1,-0.00307059407234192,4.339592074230311,11.8,0,0,0,collision,-51.74483562665989,False,0,0.0

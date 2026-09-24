@@ -1,9 +1,0 @@
-{
-  "method": "policy",
-  "seed": 0,
-  "slip": 0.1,
-  "evaluation_episodes": 100,
-  "successes": 100,
-  "environment": "discrete grid robot",
-  "evaluation_rng_seed": 10000
-}

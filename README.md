@@ -1,62 +1,72 @@
-# ARC: nine connected ROS 2 laboratories
+# AI Planning for Robotics Systems: ROS 2 laboratories
 
-The student reader is [docs/ARC_Laboratories.html](docs/ARC_Laboratories.html). Download/open it in a browser; figures and equations are included. It starts with environment recovery and a beginner ROS guide. Lab 1 is preserved from the supplied reader.
+This repository contains nine connected laboratories in which you build a small robot software system, first with ROS 2 messages and then with mapping, navigation and reinforcement learning. The robot runs in Gazebo for the live experiments. Later labs also use small Python simulations so you can inspect an algorithm before connecting it to a ROS robot.
 
-| Lab | Main outcome |
-|---|---|
-| 1 | Send, receive and use ROS messages |
-| 2 | Model, inspect and drive the robot in Gazebo |
-| 3 | Occupancy mapping, SLAM and a saved map |
-| 4 | Search and path tracking; connected navigation extensions |
-| 5 | Nav2 localisation and goal-directed navigation |
-| 6 | Dynamic programming and tabular Q-learning |
-| 7 | DQN and Double DQN on robot observations |
-| 8 | REINFORCE, actor-critic concepts and PPO |
-| 9 | ROS policy deployment, hybrid control and evaluation |
+**Start with the [student laboratory reader](docs/ARC_Laboratories.html).** Download or open this HTML file in a browser. It includes setup and recovery instructions, a beginner ROS 2 command guide, and Labs 1–9 with diagrams and activities. If you prefer separate chapters, use [Start here](docs/labs/README.md) and the [lab source pages](docs/labs/). You do not need robotics or ROS experience to begin Lab 1.
 
-Coursework is submitted in week 6 and uses Labs 1–4 only. See [coursework scope](docs/projects/coursework_week06.md). The course manifest is `course.json`.
+## What you will do
 
-## Source layout
+| Lab | Main result | Where you see it |
+|---|---|---|
+| 1. Messages and nodes | Publish a reading, receive it, and build your own ROS package | Terminal messages; no Gazebo needed |
+| 2. Robot model and motion | Drive the robot and measure its movement and laser scans | Gazebo and ROS topics |
+| 3. Mapping and SLAM | Build a grid map, map while moving, and save the result | Python map, Gazebo, RViz, saved YAML/PGM map |
+| 4. Planning and control | Choose a route and compare how a robot follows it | Animated Python replay and measured trajectory |
+| 5. Nav2 | Localise on the saved map and send a navigation goal | Gazebo, RViz and final ROS action result |
+| 6. Tabular reinforcement learning | Learn a grid robot's decisions from reward | Grid robot replay and learned value table |
+| 7. DQN and Double DQN | Learn action values from continuous observations | Python robot replay and evaluation report |
+| 8. Policy gradients and PPO | Train a policy that chooses continuous commands | Training outputs and Python robot replay |
+| 9. ROS policy deployment | Run a fixed policy on the simulated ROS robot and evaluate it | Gazebo episode CSV and separate Python comparisons |
 
-`arc_description`, `arc_gazebo` and `arc_nav` contain robot, simulation and Nav2 integration. `arc_course` contains motion and policy-execution nodes. `arc_sensors`, `arc_mapping`, `arc_localization` and `arc_recovery` use functional names so lab renumbering does not change their purpose. `arc_lab1` is retained unchanged in purpose.
+The coursework due in **week 6** uses **Labs 1–4**. See the [coursework scope](docs/projects/coursework_week06.md). Nav2 and reinforcement learning come afterward.
 
-`teaching` contains runnable numerical experiments. `starters` contains student functions and reference tests. `teaching/building/robot_workshop` is the progressive student package reference; its `COLCON_IGNORE` keeps it out of the course workspace build. Students build their own copy in `~/student_ws`.
+## Start in the supplied Ubuntu VM
 
-`docs/labs` contains the current explanations; `docs/reader/lab01.html` preserves the supplied Lab 1 exactly. `docs/archive` and `scripts/archive` are historical material, not current build instructions. Do not regenerate maintained packages from archived templates.
-
-## Run in the course VM
-
-Use ROS 2 Jazzy, Gazebo Harmonic and the supplied ARC VM. After applying this revision, run the new setup script directly once:
+The live robot labs use the supplied course VM with **Ubuntu 24.04, ROS 2 Jazzy and Gazebo Harmonic**. Open a terminal *inside Ubuntu*. To make the course packages available in each new terminal, run:
 
 ```bash
-bash ~/arc_ws/src/arc-course/scripts/arc-setup --clean
+source /opt/ros/jazzy/setup.bash
 source ~/arc_ws/install/setup.bash
+cd ~/arc_ws/src/arc-course
 ```
 
-A clean rebuild removes stale installed package names. It regenerates build/install/log, retaining source, maps, bags and student work. Setup installs a user-owned Python path file so ROS nodes can import the repository's shared teaching modules. The autostart helper supports `arc-setup --unattended`; missing system dependencies still require a manual setup.
+Successful `source` commands normally print nothing. The last command moves to the course repository so paths used in the labs work. To check your setup, run `ros2 pkg prefix arc_lab1`. It should print a path ending in `install/arc_lab1`. If the workspace is missing or the build fails, follow the recovery instructions in [Start here](docs/labs/README.md). You do not need to run setup each time you open a terminal.
 
-## Verify without ROS
+Try the first lab with two prepared terminals:
 
-The numerical experiments run with Python 3.12. In an isolated development environment, install CPU PyTorch and the teaching requirements. On the course VM use the provisioned environment; do not replace ROS system dependencies casually.
+| Terminal | Command | What should happen |
+|---|---|---|
+| A | `ros2 run arc_lab1 range_source` | A node begins publishing simulated distance readings at 10 Hz. Leave it running. |
+| B | `ros2 topic echo /range --once` | One message with a `data:` number appears, then the prompt returns. |
+| B | `ros2 run arc_lab1 range_monitor` | The monitor prints the rate of messages it receives. Press Ctrl+C to stop it. |
 
-```bash
-python3 -m pip install 'torch>=2.8,<3' --index-url https://download.pytorch.org/whl/cpu
-python3 -m pip install -r requirements-teaching.txt
-python3 -m pytest starters arc_eval teaching/tests -q
-```
+The [Lab 1 chapter](docs/labs/lab01/manual.md) explains what a node, topic, publisher and subscriber mean, and guides you through writing your own two programs. Read it as you work rather than memorising commands from this page.
 
-GitHub Actions runs this suite. It cannot substitute for Gazebo acceptance on the actual VM. See [verification](verification/README.md) for recorded results and pending runtime checks.
+## What is source and what is generated?
 
-## Build the student HTML
+| Path | Purpose |
+|---|---|
+| `docs/ARC_Laboratories.html` | Main student reader; open it in a browser |
+| `docs/labs/lab01` to `lab09` | Individual lab chapters and explanations |
+| `starters/` | Student exercises and tests for algorithm logic |
+| `teaching/` | Runnable Python examples and a reference scaffold for a student ROS package |
+| `arc_description/`, `arc_gazebo/`, `arc_nav/`, `arc_*/` | Robot model, ROS packages, simulation and navigation code |
+| `scripts/` | Setup, cleanup, diagnostics and reader-building tools |
+| `~/student_ws/src/robot_workshop/` | Your own ROS package, created in Lab 1 and extended later |
+| `~/arc_ws/build/`, `install/`, `log/` | Generated by the build; change source files instead |
+| `~/arc_ws/bags/`, `maps/`, `results/`, repository `models/` and `results/` | Your recorded data and experiment outputs; keep the files you need |
 
-With Pandoc installed:
+Lab 2 starts with a stationary model in RViz, then moves a robot in Gazebo. Labs 4 and 6–8 use **numerical robot replays**; an animated replay there is not a Gazebo run. The lab chapters say which environment produces each result.
 
-```bash
-python3 scripts/build-teaching-reader.py --out docs/ARC_Laboratories.html
-```
+## If something does not work
 
-The reader embeds checked-in figures. To regenerate the new figures, run the mapping, navigation and tabular demos and pass their output directories to `scripts/make-nine-figures.py`. Do not edit generated HTML as the only source of a revision; edit the Markdown or preserved reader fragment and rebuild.
+- If `ros2` or a course package cannot be found, run the two `source` lines again in the *same terminal* where you will run the command.
+- If a package is missing after an update, stop running experiments and follow the clean rebuild in [Start here](docs/labs/README.md). The VM can also run `arc-setup` automatically at desktop login; let it finish before starting another setup.
+- If Gazebo opens but the robot or laser does not behave as expected, use `course-check` and `course-smoke-test --headless` with other simulations stopped. For VM rendering issues, see [graphics and laser troubleshooting](docs/vm_graphics_and_gpu_sensors.md).
+- If you are unsure what a ROS command means, use the [ROS command guide](docs/labs/ROS_TOOLKIT.md) or the command's `--help` option. Keep the first error message when asking for help.
 
-## Experimental evaluation adapter
+## For readers outside the course VM
 
-`arc_eval/ros_nav2_env.py` is an unfinished reset adapter and is excluded from the nine-lab execution path. Its reset fails explicitly. Use Lab 5's navigation action client and Lab 9's single-episode recorder. A proximity measurement is not a physical contact sensor, and the fast simulator is not Gazebo.
+The source code and lab text can be browsed on any computer. The numerical Python experiments have a separate dependency list in `requirements-teaching.txt` and can be explored without ROS, but the live Gazebo, SLAM and Nav2 activities require a compatible ROS 2 installation. The automated test suite runs with `python3 -m pytest starters arc_eval teaching/tests -q`; a passing offline suite does not prove that live robot simulation works on your machine.
+
+To rebuild the HTML reader after editing its student chapters, use `python3 scripts/build-teaching-reader.py --out docs/ARC_Laboratories.html`. The student instructions are the Markdown lab chapters and reader fragments; the HTML is the distribution copy.

@@ -1,6 +1,0 @@
-{
-  "algorithm": "REINFORCE",
-  "seed": 0,
-  "episodes": 20,
-  "horizon": 150
-}
