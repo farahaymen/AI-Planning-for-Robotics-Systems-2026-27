@@ -94,7 +94,7 @@ if [[ -z "${ROS_DISTRO:-}" ]]; then
     set +u; source /opt/ros/jazzy/setup.bash; set -u
     note "sourced /opt/ros/jazzy/setup.bash"
   else
-    die "ROS 2 Jazzy not found at /opt/ros/jazzy. Run the provisioning stages first."
+    die "ROS 2 Jazzy not found at /opt/ros/jazzy. Use the supplied course VM or ask for its setup to be repaired."
   fi
 fi
 
@@ -211,7 +211,7 @@ if command -v rosdep >/dev/null 2>&1; then
   fi
 else
   if [[ $UNATTENDED -eq 1 ]]; then
-    die "rosdep is not installed; complete the VM provisioning before automatic setup."
+    die "rosdep is not installed; ask for the supplied course VM to be repaired before automatic setup."
   fi
   note "rosdep not installed; skipping"
 fi

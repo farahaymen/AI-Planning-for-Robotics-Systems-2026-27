@@ -21,3 +21,24 @@ maps/*.pgm
 # editors
 .vscode/
 .idea/
+
+# Teacher-only notes and internal course preparation
+*teacher*
+*Teacher*
+*TEACHER*
+*instructor*
+*Instructor*
+*INSTRUCTOR*
+*staff*
+*Staff*
+*STAFF*
+/APPLY.md
+/PUSH_INSTRUCTIONS.md
+/docs/golden_vm_build_runbook.md
+/docs/labs/CODE_ALIGNMENT.md
+/docs/labs/SOURCE_REVIEW.md
+/docs/templates/
+/docs/archive/
+/scripts/archive/
+/scripts/provision/
+/verification/
