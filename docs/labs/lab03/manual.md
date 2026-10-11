@@ -4,6 +4,33 @@ The robot can move and measure distance. To navigate beyond its immediate view, 
 
 **Your result:** a map built from supplied poses, a map built while SLAM estimates the route, and a saved YAML/image pair for navigation. Spend about 40 minutes on the mapper, 50 on a SLAM route, and 30 comparing and saving evidence.
 
+## Occupancy grid mapping versus SLAM
+
+Before beginning, distinguish between the map representation and the broader mapping-and-localization problem.
+
+### Occupancy grid mapping
+
+An **occupancy grid** divides space into cells, each with evidence about whether it is free, occupied, or unknown. To update the grid using a LiDAR scan, we must know (or assume) the **pose of the sensor** when it measured the ranges.
+
+For each laser beam, the mapper converts its range and angle into a world-space endpoint, traces the grid cells crossed by the beam, adds free-space evidence along the path, and adds occupied evidence at the endpoint only when the sensor detected an obstacle. Our exercise represents this evidence as **log odds**.
+
+**Occupancy grid mapping with supplied poses is not SLAM.** This mapper does not estimate the robot's position or correct drift.
+
+### SLAM: simultaneous localization and mapping
+
+**SLAM** attempts to estimate **where the robot is** while constructing a representation of **what the environment looks like**. Odometry predicts motion, while overlapping laser scans provide geometric constraints. Scan matching and potentially loop closure help correct the estimated trajectory.
+
+An occupancy grid is one possible **map representation** produced by a SLAM system, but it is not the entire SLAM algorithm. The offline student mapper and ROS 2 SLAM Toolbox are separate implementations: SLAM Toolbox does **not** run the student's `occupancy_skeleton.py` internally.
+
+### The three experiments in this lab
+
+| Stage | Where the poses come from | What we learn |
+|---|---|---|
+| A. Known-pose mapping | Exact supplied simulation poses | How laser rays update an occupancy grid |
+| B. Odometry-based mapping | Recorded `/odom` estimates | Why pose errors distort a map |
+| C. SLAM Toolbox | Poses jointly estimated using odometry and scans | How a robot can estimate its trajectory while mapping |
+
+The progression is deliberate: understand mapping with given poses, observe the limitations of imperfect odometry, then use a complete SLAM system that can revise the trajectory estimate.
 ## Start with poses that we know
 
 Suppose a robot knows its position and heading exactly and measures an obstacle 2 m ahead. Draw a ray from the sensor to the measured endpoint. Cells before that endpoint receive evidence of free space; the endpoint receives evidence of an obstacle. This is **mapping with known poses**. It does not estimate the robot's location.
@@ -44,6 +71,31 @@ These increments are model choices. Repeated scans are often correlated, so inde
 
 In `starters/lab03/occupancy.py`, `integrate_scan` calculates endpoints, `bresenham` identifies cells along a ray, and `_update_cell` adds and clamps evidence. A range at the maximum is a miss, not an occupied endpoint. Otherwise the map develops a false ring at the sensor range limit. Invalid ranges are ignored in this mapper; a controller directly commanding motion may need a stricter response.
 
+### Why the student tests initially fail
+
+The lab includes a completed **reference** mapper, `starters/lab03/occupancy.py`, and an incomplete **student** mapper, `starters/lab03/occupancy_skeleton.py`.
+
+The skeleton intentionally raises `NotImplementedError` in two unfinished methods. Therefore its initial test failures are **expected**; they do not by themselves indicate a broken ROS or Python installation.
+
+1. **Check the reference first:**
+
+   ```bash
+   python3 -m pytest starters/lab03/tests -q
+   ```
+
+2. **Observe the incomplete student tests:**
+
+   ```bash
+   ARC_OCCUPANCY=occupancy_skeleton python3 -m pytest starters/lab03/tests -q
+   ```
+
+   With the provided untouched skeleton, **5 tests pass and 8 fail** because `integrate_scan` has not been implemented.
+
+3. **Implement the six TODOs** in `occupancy_skeleton.py`: discard invalid readings; decide hit/miss; calculate world endpoints and grid rays; update intermediate free cells; update the endpoint correctly; and update/clamp log odds.
+
+4. **Rerun the student tests** until they pass. Do not alter the tests or copy the reference implementation without understanding it.
+
+5. **Process the recorded Lab 2 bag** with your mapper by setting `ARC_OCCUPANCY=occupancy_skeleton` on `teaching.map_bag`.
 **Build your mapper** in `starters/lab03/occupancy_skeleton.py`. Start with coordinate conversion and a horizontal ray on a tiny grid, then implement evidence updates:
 
 ```bash
