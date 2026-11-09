@@ -4,6 +4,14 @@ A policy trained in a numerical environment is a function, not a complete robot 
 
 **Your result:** run a policy on the Gazebo robot through ROS topics, record an actual episode and compare it with the lightweight simulator. You will also evaluate a hybrid controller and explain where its checks can and cannot help.
 
+## What Lab 9 adds after Lab 6
+
+In Lab 6 you learned a table for a **known grid cell** and loaded it into Gazebo. A supplied ROS controller translated each discrete grid action into wheel movement. The tabular policy was **not** trained from LiDAR or odometry, and it did not directly predict velocity commands.
+
+Lab 9 is different: Lab 7 DQN and Lab 8 PPO policies use **ROS sensor observations** (24 laser ranges, goal information and measured velocities) to select movement commands. The learning problem becomes transferring that observation/action interface to Gazebo, validating timing and frames, and measuring whether the policy actually reaches goals. A matching grid is no longer assumed.
+
+Do not pass Lab 6's `q.npy` to the Lab 9 `policy_driver`. Lab 6 uses `lab06_gazebo.launch.py` and `grid_policy_driver`; Lab 9 expects a compatible DQN `policy.pt` or PPO `.zip` checkpoint (or the hand-written gap baseline). Both labs perform **inference** in Gazebo. Lab 9 additionally records real ROS episodes and tests the limits of sensor-based transfer.
+
 ## Preserve the meaning of every input
 
 Lab 7 and Lab 8 trained on 24 ranges, relative goal distance and direction, and body velocities. The ROS adapter must produce those same quantities. A correct array length is insufficient if the first range points forward in one environment and backward in another.

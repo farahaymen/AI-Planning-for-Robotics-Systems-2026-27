@@ -26,7 +26,14 @@ def render(source):
         data = base64.b64encode(image_path.read_bytes()).decode("ascii")
         return 'src="data:image/png;base64,' + data + '"'
 
-    body = re.sub(r'src="([^"\n]+\.png)"', embed, body)
+    # Preserve external image URLs; only local PNGs are embedded for offline reading.
+    def embed_local(match):
+        image_url = match.group(1)
+        if image_url.startswith(("https://", "http://", "data:")):
+            return match.group(0)
+        return embed(match)
+
+    body = re.sub(r'src="([^"\n]+\.png)"', embed_local, body)
     body = re.sub(r'href="(?:\.\./)?README\.md"', 'href="#start"', body)
     body = re.sub(r'href="lab(\d\d)/manual\.md"', r'href="#lab\1"', body)
     body = re.sub(r'href="(?:\.\./)?ROS_TOOLKIT\.md"', 'href="#commands"', body)
