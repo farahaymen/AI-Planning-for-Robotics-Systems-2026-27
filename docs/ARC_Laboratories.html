@@ -3556,6 +3556,62 @@ alt="The learned grid values and actions can be inspected before using a neural 
 <figcaption aria-hidden="true">The learned grid values and actions can
 be inspected before using a neural network.</figcaption>
 </figure>
+<h2 id="lab06-watch-one-table-entry-change-while-the-robot-trains">Watch one
+table entry change while the robot trains</h2>
+<p>From the course repository in the Ubuntu desktop, install Pygame once
+with <code>sudo apt install python3-pygame</code>. Add
+<code>--live</code> to a Q-learning run:</p>
+<div class="sourceCode" id="lab06-cb4"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="lab06-cb4-1"><a href="#lab06-cb4-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> <span class="at">-m</span> teaching.tabular <span class="at">--method</span> q <span class="at">--episodes</span> 3000 <span class="at">--seed</span> 0 <span class="at">--live</span> <span class="at">--out</span> results/lab06_live</span></code></pre></div>
+<p>The blue dot is the robot after the action. Every free, non-goal cell
+shows its four Q-values in compass order. The orange entry is the one
+just updated, even if the robot slipped in a different direction. Green
+shows the current greedy choice. Pause with <strong>Space</strong> and
+use the panel to compare the reward, target, old Q-value and new
+Q-value. The first few steps run slowly, then training speeds up. Press
+<strong>F</strong> to switch speeds. Press <strong>Esc</strong> or close
+the window to finish training without the display. The viewer closes
+when training finishes, and the experiment saves the usual results. Use
+a fresh output folder on each run.</p>
+<h2 id="lab06-run-the-saved-table-on-the-gazebo-robot">Run the saved table on
+the Gazebo robot</h2>
+<p>The Gazebo world has the same six-by-six layout, with one metre per
+cell. The blue square is the start and the green square is the goal. Use
+a fresh simulator session, with no teleoperation, Nav2 or other node
+sending <code>/cmd_vel</code>. In an Ubuntu terminal:</p>
+<div class="sourceCode" id="lab06-cb5"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="lab06-cb5-1"><a href="#lab06-cb5-1" aria-hidden="true" tabindex="-1"></a><span class="bu">source</span> /opt/ros/jazzy/setup.bash</span>
+<span id="lab06-cb5-2"><a href="#lab06-cb5-2" aria-hidden="true" tabindex="-1"></a><span class="bu">cd</span> ~/arc_ws</span>
+<span id="lab06-cb5-3"><a href="#lab06-cb5-3" aria-hidden="true" tabindex="-1"></a><span class="ex">colcon</span> build <span class="at">--symlink-install</span> <span class="at">--packages-select</span> arc_gazebo arc_course</span>
+<span id="lab06-cb5-4"><a href="#lab06-cb5-4" aria-hidden="true" tabindex="-1"></a><span class="bu">source</span> install/setup.bash</span>
+<span id="lab06-cb5-5"><a href="#lab06-cb5-5" aria-hidden="true" tabindex="-1"></a><span class="ex">arc-clean</span></span>
+<span id="lab06-cb5-6"><a href="#lab06-cb5-6" aria-hidden="true" tabindex="-1"></a><span class="bu">cd</span> ~/arc_ws/src/arc-course</span>
+<span id="lab06-cb5-7"><a href="#lab06-cb5-7" aria-hidden="true" tabindex="-1"></a><span class="ex">ros2</span> launch arc_course lab06_gazebo.launch.py q_table:=<span class="st">&quot;</span><span class="va">$PWD</span><span class="st">/results/lab06_live/q.npy&quot;</span></span></code></pre></div>
+<p>Wait for the robot to spawn and for the controllers to start. The
+terminal prints the grid cell, chosen direction and next cell at each
+move. At the green square, it prints <code>Goal reached</code> and stops
+the robot. Gazebo stays open for inspection. Stop it with
+<strong>Ctrl+C</strong>. If the VM struggles with the Gazebo window, add
+<code>headless:=true</code> and follow the cell updates in the terminal.
+Use the same launch command with the path to the student’s
+<code>q.npy</code> to run their policy.</p>
+<p>The ROS node reads <code>/odom</code> and publishes
+<code>/cmd_vel</code>. The <strong>learned</strong> part picks a
+direction from the current row of the saved Q-table. A <strong>supplied
+controller</strong> turns the robot and drives it toward the next cell
+centre. The table does not learn to control the wheels. Gazebo does not
+inject the training grid’s random slip, and the adapter does not use
+LiDAR to choose actions. This experiment runs a fixed policy in a
+matching world; it does not train in Gazebo or test navigation in an
+unknown map.</p>
+<p>Once the packages are built and sourced, the shell can start Gazebo
+automatically when a training command finishes successfully:</p>
+<div class="sourceCode" id="lab06-cb6"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="lab06-cb6-1"><a href="#lab06-cb6-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> <span class="at">-m</span> teaching.tabular <span class="at">--method</span> q <span class="at">--live</span> <span class="at">--out</span> results/lab06_handoff <span class="kw">&amp;&amp;</span></span>
+<span id="lab06-cb6-2"><a href="#lab06-cb6-2" aria-hidden="true" tabindex="-1"></a><span class="ex">ros2</span> launch arc_course lab06_gazebo.launch.py q_table:=<span class="st">&quot;</span><span class="va">$PWD</span><span class="st">/results/lab06_handoff/q.npy&quot;</span></span></code></pre></div>
+<p>Compare the route with the training grid replay. Can you tell which
+differences come from the chosen policy and which come from how a
+wheeled robot turns and moves?</p>
 <h2 id="lab06-a-time-limit-is-not-always-a-terminal-state">A time limit is not
 always a terminal state</h2>
 <p>The Q-learning collector stops an attempt after 150 steps to avoid an
@@ -3571,12 +3627,12 @@ every “episode ended” flag to terminal.</p>
 <h2 id="lab06-connect-this-to-robot-software">Connect this to robot
 software</h2>
 <p>RL does not replace ROS messages. ROS carries observations into a
-policy and carries chosen commands out. In Lab 6 we isolate learning
-from sensor transport so you can inspect each table entry. Lab 7
-introduces continuous robot observations, and Lab 9 connects policies to
-live ROS topics. Do not publish grid actions as <code>Twist</code>
-values; “north” is a grid transition, not a body-frame wheel
-command.</p>
+policy and carries chosen commands out. In Lab 6 we train separately so
+you can inspect each table entry, then try the fixed grid policy in
+Gazebo. Lab 7 introduces continuous robot observations, and Lab 9
+connects policies that use live sensor observations to ROS. Do not
+publish grid actions as <code>Twist</code> values; “north” is a grid
+transition, not a body-frame wheel command.</p>
 <p>Your investigation is to vary slip or the movement penalty, retrain,
 and explain the resulting policy using the objective. A reward is a
 design choice, not an automatic definition of good behaviour. A robot
@@ -3602,6 +3658,22 @@ failed attempts separately from return.</p>
 <tr class="even">
 <td><code>teaching/tabular.py</code></td>
 <td>Environment, reference algorithms and experiment driver</td>
+</tr>
+<tr class="odd">
+<td><code>teaching/tabular_view.py</code></td>
+<td>Optional Pygame view of the training updates</td>
+</tr>
+<tr class="even">
+<td><code>teaching/tabular_motion.py</code></td>
+<td>Controller that turns a grid action into motion toward a cell</td>
+</tr>
+<tr class="odd">
+<td><code>arc_course/arc_course/grid_policy_driver.py</code></td>
+<td>ROS node that loads the table and drives the simulated robot</td>
+</tr>
+<tr class="even">
+<td><code>arc_gazebo/worlds/lab06_grid.sdf</code></td>
+<td>Matching Gazebo world for the deployment demo</td>
 </tr>
 <tr class="odd">
 <td><code>results/lab06_q</code></td>

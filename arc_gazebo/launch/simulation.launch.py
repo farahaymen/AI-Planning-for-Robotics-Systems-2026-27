@@ -152,7 +152,7 @@ def launch_setup(context, *args, **kwargs):
 def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument("world", default_value="arc_warehouse",
-                              description="arc_warehouse, broken_a, broken_b or broken_c"),
+                              description="arc_warehouse, lab06_grid, broken_a, broken_b or broken_c"),
         DeclareLaunchArgument("headless", default_value="false",
                               description="true for graphics Tier B"),
         DeclareLaunchArgument("render_engine", default_value="ogre2",

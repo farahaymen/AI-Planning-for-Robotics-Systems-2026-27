@@ -1,12 +1,27 @@
 """Lab 6: a small robot learns to navigate a grid, with visible saved rollouts."""
 from __future__ import annotations
 import argparse
+from dataclasses import dataclass
 import json
 from pathlib import Path
 import numpy as np
 from teaching.animation import save_replay
 
 MOVES = ((0,1),(1,0),(0,-1),(-1,0))  # east, north, west, south in (row,column)
+
+
+@dataclass(frozen=True)
+class TrainingStep:
+    episode: int
+    step: int
+    epsilon: float
+    state: int
+    action: int
+    next_state: int
+    reward: float
+    target: float
+    old_value: float
+    terminated: bool
 
 
 class GridRobot:
@@ -73,15 +88,19 @@ def q_update(q, state, action, reward, next_state, terminated, alpha=.2, gamma=.
     return float(target)
 
 
-def learn(env, episodes=3000, seed=0):
+def learn(env, episodes=3000, seed=0, observe=None):
     rng=np.random.default_rng(seed);q=np.zeros((env.n_states,4));returns=[]
     for episode in range(episodes):
         state=env.state(env.start);total=0.
         epsilon=max(.05,1.-episode/(episodes*.8))
-        for _ in range(150):
+        for step in range(150):
             action=int(rng.integers(4)) if rng.random()<epsilon else int(q[state].argmax())
             s2,reward,terminated=env.sample(state,action,rng)
-            q_update(q,state,action,reward,s2,terminated)
+            old_value = q[state, action] if observe is not None else None
+            target = q_update(q,state,action,reward,s2,terminated)
+            if observe is not None:
+                observe(q, TrainingStep(episode + 1, step + 1, epsilon, state,
+                                         action, s2, reward, target, old_value, terminated))
             total+=reward;state=s2
             if terminated:break
         # The 150-step collection cutoff is external, not a terminal state.
@@ -95,12 +114,26 @@ def main():
     p.add_argument('--episodes',type=int,default=3000)
     p.add_argument('--seed',type=int,default=0)
     p.add_argument('--slip',type=float,default=.1)
+    p.add_argument('--live',action='store_true',help='show the Q-table and robot during training (Pygame)')
     p.add_argument('--out',type=Path,required=True)
     a=p.parse_args()
     if a.out.exists() or a.episodes<1:p.error('Use a new output directory and positive episode count')
-    env=GridRobot(a.slip);a.out.mkdir(parents=True)
+    if a.live and a.method != 'q':p.error('--live requires --method q')
+    env=GridRobot(a.slip)
+    view = None
+    if a.live:
+        try:
+            from teaching.tabular_view import TrainingView
+            view = TrainingView(env, a.episodes)
+        except (ImportError, RuntimeError) as exc:
+            p.error(str(exc))
+    a.out.mkdir(parents=True)
     if a.method=='q':
-        q,returns=learn(env,a.episodes,a.seed);policy=q.argmax(axis=1);values=q.max(axis=1);np.save(a.out/'q.npy',q)
+        try:
+            q,returns=learn(env,a.episodes,a.seed,observe=view)
+        finally:
+            if view is not None:view.close()
+        policy=q.argmax(axis=1);values=q.max(axis=1);np.save(a.out/'q.npy',q)
         np.savetxt(a.out/'returns.csv',returns,delimiter=',',header='episode_return',comments='')
     else:
         values,policy,_=(value_iteration if a.method=='value' else policy_iteration)(env)
