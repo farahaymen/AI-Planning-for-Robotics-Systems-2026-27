@@ -23,6 +23,11 @@ The grid robot usually moves in the requested direction, but sometimes slips sid
 
 ![The agent acts, receives a reward and updates its decision rule from the transition.](../../figures/nine/lab06_flow.png)
 
+![Agent and environment exchange the current state, an action, the next state and its reward.](https://dilithjay.com/assets/images/rl-formulation.png)
+
+*The agent receives state `S_t`, chooses action `A_t`, and receives reward `R_{t+1}` together with the new state `S_{t+1}`. This is the interaction loop used in training. [Image source](https://dilithjay.com/assets/images/rl-formulation.png).*
+
+
 ## Why immediate reward is not enough
 
 Moving toward the goal can require a detour. We therefore consider **return**, the sum of future rewards. With discount factor $\gamma$:
@@ -51,7 +56,12 @@ These methods are useful here as a reference answer. Calling them model-free lea
 **Q-learning** updates a table after observing one transition:
 
 $$Q(s,a)\leftarrow Q(s,a)+\alpha\left[y-Q(s,a)\right],$$
-$$y=r+\gamma(1-d)\max_{a'}Q(s',a').$$
+$y=r+\gamma(1-d)\max_{a'}Q(s',a').$
+
+![Annotated Q-learning update: old value, reward, learning rate, discount factor and best next-state value.](https://miro.medium.com/1*vTMQI14ls9lWzRXzJGi4sg.jpeg)
+
+*In this diagram the temporal-difference error is the difference between the target and the current Q-value. It illustrates a **nonterminal** transition; our code multiplies the future-value term by `(1-d)` so no future reward is added after reaching the goal. [Image source](https://miro.medium.com/1*vTMQI14ls9lWzRXzJGi4sg.jpeg).*
+
 
 Here $s'$ is the next state; $a'$ ranges over its possible actions; $d$ is 1 for a true terminal transition and 0 otherwise. The target $y$ combines observed reward and an estimate of future return. The difference $y-Q(s,a)$ is the **temporal-difference error**. The learning rate $\alpha$ controls how much of that difference is applied now.
 
