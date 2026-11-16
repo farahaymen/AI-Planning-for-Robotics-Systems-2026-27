@@ -20,6 +20,102 @@ Training changes weights to reduce a prediction error. A **gradient** describes 
 
 ![DQN learns from replayed transitions and uses a separate target network. Double DQN separates action selection from evaluation.](../../figures/nine/lab07_flow.png)
 
+## DQN visually: the step-by-step training cycle
+
+The following diagrams are by **Ketan Doshi**, from [Reinforcement Learning Explained Visually (Part 5): Deep Q Networks, step-by-step](https://medium.com/data-science/reinforcement-learning-explained-visually-part-5-deep-q-networks-step-by-step-5a5317197f4b). The images are linked from [the author's own illustrated edition](https://ketanhdoshi.github.io/Reinforcement-Learning-Deep-Q-Network/); they require an internet connection in the otherwise offline HTML reader. The explanation alongside each image refers to **our Lab 7 implementation**, not necessarily the article's exact hyperparameters.
+
+### First, connect the Q-table to the DQN architecture
+
+![A small Q-table maps each state-action pair to an estimated return.](https://ketanhdoshi.github.io/assets/images/RLDQN/Overview-1.png)
+
+Lab 6 used a table indexed by the exact grid cell and an action. It cannot enumerate the continuous observations used here.
+
+![A neural network replaces a table lookup by predicting action values.](https://ketanhdoshi.github.io/assets/images/RLDQN/Overview-3.png)
+
+In Lab 7, one 29-number observation enters the online network and six Q-values come out, one for each discrete robot action.
+
+![The DQN architecture includes replay memory, an online Q-network and a target network.](https://ketanhdoshi.github.io/assets/images/RLDQN/Arch-1.png)
+
+Only the online network receives gradient updates. The target network supplies temporarily stable future-value estimates.
+
+![The high-level DQN workflow combines experience collection, prediction, target computation and learning.](https://ketanhdoshi.github.io/assets/images/RLDQN/Workflow-1.png)
+
+The same phases repeat over environment steps; one gradient update is not the same as an entire episode.
+
+### Part A: initialize the learner
+
+**Step 1: Bootstrap replay memory.** Collect early transitions before the first parameter update. `teaching/deep_q.py` starts training once the buffer has at least 256 samples.
+
+![DQN step 1: bootstrap replay memory.](https://ketanhdoshi.github.io/assets/images/RLDQN/DQN-1.png)
+
+**Step 2: Initialize and synchronize both networks.** Create online and target networks with matching architecture, then copy the online weights to the target. Only the online network will be optimized.
+
+![DQN step 2: initialize and synchronize both networks.](https://ketanhdoshi.github.io/assets/images/RLDQN/DQN-2.png)
+
+### Part B: gather training data
+
+**Step 3: Choose an epsilon-greedy action.** Obtain six current Q estimates from the online network; with probability epsilon take a random action, otherwise choose the action index with the largest Q estimate.
+
+![DQN step 3: choose an epsilon-greedy action.](https://ketanhdoshi.github.io/assets/images/RLDQN/DQN-3.png)
+
+**Step 4: Execute the action.** Apply the chosen velocity pair in the fast navigation environment and observe the next observation, reward, and termination or truncation.
+
+![DQN step 4: execute the action.](https://ketanhdoshi.github.io/assets/images/RLDQN/DQN-4.png)
+
+**Step 5: Store the transition in replay memory.** Append `(observation, action, reward, next_observation, terminated)` to the bounded replay buffer. In this implementation, a time-limit truncation does not set the terminal-learning mask.
+
+![DQN step 5: store the transition in replay memory.](https://ketanhdoshi.github.io/assets/images/RLDQN/DQN-5.png)
+
+### Part C: train from a replay minibatch
+
+**Step 6: Sample a shuffled minibatch.** Randomly select 64 stored transitions, mixing older and newer experience. The code updates the network every four environment steps once memory contains at least 256 samples.
+
+![DQN step 6: sample a shuffled minibatch.](https://ketanhdoshi.github.io/assets/images/RLDQN/DQN-6.png)
+
+**Step 7: Predict Q-values for sampled current observations.** Pass each batch observation through the online network; each row contains six predicted action values.
+
+![DQN step 7: predict q-values for sampled current observations.](https://ketanhdoshi.github.io/assets/images/RLDQN/DQN-7.png)
+
+**Step 8: Select the prediction for the action actually taken.** Gather the online Q-value at the stored action index. The loss trains this selected prediction, not all six outputs against one target.
+
+![DQN step 8: select the prediction for the action actually taken.](https://ketanhdoshi.github.io/assets/images/RLDQN/DQN-8.png)
+
+**Step 9: Evaluate each next observation with the target network.** Pass next observations through the target network and obtain candidate future values without tracking gradients.
+
+![DQN step 9: evaluate each next observation with the target network.](https://ketanhdoshi.github.io/assets/images/RLDQN/DQN-9.png)
+
+**Step 10: Build the bootstrap target.** For ordinary DQN, use the target network's maximum next-action value: `reward + gamma * (1 - terminated) * max(target_next)`. For terminal samples, the future term is zero.
+
+![DQN step 10: build the bootstrap target.](https://ketanhdoshi.github.io/assets/images/RLDQN/DQN-10.png)
+
+**Step 11: Compare predictions with targets.** Calculate the difference between the selected online prediction and the detached target, one value per sampled transition.
+
+![DQN step 11: compare predictions with targets.](https://ketanhdoshi.github.io/assets/images/RLDQN/DQN-11.png)
+
+**Step 12: Calculate the batch loss.** The article illustrates mean-squared error. This lab uses PyTorch `smooth_l1_loss` (Huber-style), which is less sensitive to large errors.
+
+![DQN step 12: calculate the batch loss.](https://ketanhdoshi.github.io/assets/images/RLDQN/DQN-12.png)
+
+### Part D: optimize, repeat and refresh the target network
+
+**Step 13: Backpropagate through the online network.** Clear old gradients, backpropagate the loss, clip gradient norm, and step the Adam optimizer. Do not optimize the target network.
+
+![DQN step 13: backpropagate through the online network.](https://ketanhdoshi.github.io/assets/images/RLDQN/DQN-13.png)
+
+**Step 14: Repeat the interaction and learning cycle.** Continue collecting transitions and performing later minibatch updates. The target network remains fixed while the online network changes.
+
+![DQN step 14: repeat the interaction and learning cycle.](https://ketanhdoshi.github.io/assets/images/RLDQN/DQN-14.png)
+
+**Step 15: Periodically synchronize the target weights.** Every 1,000 environment steps in this lab, copy online weights into the target network. The cycle then resumes with refreshed target predictions.
+
+![DQN step 15: periodically synchronize the target weights.](https://ketanhdoshi.github.io/assets/images/RLDQN/DQN-15.png)
+
+### Connect the pictures to the actual Lab 7 loss
+
+The picture sequence illustrates ordinary DQN. In this course, `td_targets` also implements **Double DQN**: select the best next action using the online network, then **evaluate that selected action** using the target network. The action choice and action value must not be confused. The lesson's terminal mask removes the bootstrap term on true termination; an external time limit does not imply a terminal Q target.
+
+In `teaching/deep_q.py`, the replay capacity is **20,000**, minibatches contain **64** transitions, optimization begins at **256** transitions and occurs every **4** environment steps, and weights are copied to the target every **1,000** steps. This is a numerical navigation simulator; **Gazebo deployment belongs to Lab 9**.
+
 ## Why there are two networks and a replay buffer
 
 A **replay buffer** stores transitions: observation, action, reward, next observation and terminal flag. Sampling a batch mixes experiences from different moments and reuses data. This reduces immediate temporal correlation in updates, although it does not make all samples independent.
